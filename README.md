@@ -55,6 +55,7 @@
 5. [AI 与 OCR 设计说明书](docs/05-AI-OCR-DESIGN.md)
 6. [API 设计说明书](docs/06-API.md)
 7. [部署与运维说明书](docs/07-DEPLOYMENT.md)
+8. [后续升级：题目勘误与相似题型推荐](docs/08-FUTURE-QUESTION-QUALITY-AND-RECOMMENDATION.md)
 
 ## Docker 一键启动
 
