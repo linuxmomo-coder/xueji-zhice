@@ -13,7 +13,34 @@ permissions:
   contents: read
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Backend tests
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          pytest -q
+      - name: Frontend build
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
+      - name: Docker configuration and build
+        run: |
+          cp .env.example .env
+          docker compose -f deployment/docker-compose.yml config
+          docker build -t xueji-zhice-backend ./backend
+          docker build -t xueji-zhice-frontend ./frontend
+
   deploy:
+    needs: preflight
     runs-on: ubuntu-latest
     environment:
       name: production
