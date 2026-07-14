@@ -24,7 +24,7 @@ jobs:
           script_stop: true
           script: |
             set -eu
-            cd "${DEPLOY_PATH:-/opt/xueji-zhice}"
+            cd "${{ secrets.DEPLOY_PATH || '/opt/xueji-zhice' }}"
             test -f .env
             git fetch origin main
             git checkout main
@@ -32,5 +32,3 @@ jobs:
             docker compose -f deployment/docker-compose.yml up -d --build --remove-orphans
             docker compose -f deployment/docker-compose.yml ps
             curl --fail --retry 10 --retry-delay 3 http://127.0.0.1/health
-        env:
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/xueji-zhice' }}
