@@ -56,6 +56,8 @@
 6. [API 设计说明书](docs/06-API.md)
 7. [部署与运维说明书](docs/07-DEPLOYMENT.md)
 8. [后续升级：题目勘误与相似题型推荐](docs/08-FUTURE-QUESTION-QUALITY-AND-RECOMMENDATION.md)
+9. [题库导入、媒体存储与答案归一化](docs/09-QUESTION-IMPORT-MEDIA-AND-ANSWER-NORMALIZATION.md)
+10. [题库数据库结构 V2](docs/10-QUESTION-BANK-DATABASE-SCHEMA-V2.md)
 
 ## Docker 一键启动
 
