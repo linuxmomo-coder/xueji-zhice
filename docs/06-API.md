@@ -1,4 +1,4 @@
-# 学迹智评 API 设计说明书 v0.2
+# 学迹智评 API 设计说明书 v0.2.1
 
 ## 1. 协议
 
@@ -27,10 +27,18 @@
 | 方法 | 路径 | 权限 | 说明 |
 |---|---|---|---|
 | POST | `/auth/register/parent` | public | 创建家长、家庭和主监护关系 |
-| POST | `/auth/login` | public | 登录并返回access/refresh |
+| POST | `/auth/login` | public | 提交邮箱、密码和角色；角色匹配后返回access/refresh |
 | POST | `/auth/refresh` | refresh | 轮换刷新令牌 |
 | POST | `/auth/logout` | refresh | 撤销会话 |
 | GET | `/auth/me` | login | 当前用户和家庭摘要 |
+
+登录请求：
+
+```json
+{"email":"parent@example.com","password":"***","role":"parent"}
+```
+
+`role`只允许`parent`、`student`、`admin`。所选角色与账号真实角色不一致时返回`AUTH_004`。登录页的角色选择只是声明登录意图，最终权限以数据库账号和服务器签发令牌为准。
 
 ### 学生
 
@@ -44,7 +52,15 @@
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/questions` | 管理员查看已发布题目；支持科目/年级分页 |
+| GET | `/questions` | 读取已发布题目；支持科目/年级分页 |
+| GET | `/questions/subjects?grade=` | 返回该年级实际可用科目和已发布题量 |
+
+`/questions/subjects`仅统计：
+
+- `questions.lifecycle_status=active`；
+- `question_versions.review_status=approved`；
+- `question_versions.publication_status=published`；
+- `questions.current_version_id`指向该版本。
 
 学生练习接口只返回题目快照，不返回标准答案。
 
@@ -58,6 +74,8 @@
 | POST | `/practice-sessions/{id}/answers` | 提交、归一化、判分、错题更新 |
 | GET | `/students/{id}/wrong-questions` | 错题列表 |
 
+前端创建练习前，应先读取学生年级及`/questions/subjects`结果。提交的题量不得超过界面显示的真实可用题量；后端仍需再次校验。
+
 ### 资料
 
 | 方法 | 路径 | 说明 |
@@ -68,11 +86,49 @@
 
 ### 工作台
 
-`GET /dashboard`根据服务器确认的角色返回允许的数据和行动，不接受role参数。
+`GET /dashboard`根据服务器确认的角色实时聚合数据库指标和可用行动，不接受role参数。
+
+响应示例：
+
+```json
+{
+  "data": {
+    "role": "parent",
+    "identity": {
+      "user_id": "...",
+      "display_name": "家长",
+      "email": "...",
+      "role": "parent",
+      "family_id": "..."
+    },
+    "metrics": [
+      {"label": "家庭学生档案", "value": 1},
+      {"label": "已完成练习", "value": 0}
+    ],
+    "actions": [
+      {"title": "创建短练习", "route": "/practice", "enabled": false, "reason": "当前年级暂无已发布题目"}
+    ],
+    "notices": [
+      {"level": "insufficient_data", "text": "暂无已完成练习，当前不能形成学习趋势判断。"}
+    ],
+    "generated_at": "2026-07-15T02:00:00Z"
+  }
+}
+```
+
+工作台统计口径：
+
+- completed练习会话；
+- 未mastered错题；
+- awaiting_confirmation资料；
+- active且approved/published题目；
+- 当前登录者有权访问的学生范围。
+
+数据为空时返回0或空数组，不返回演示数字。
 
 ### Demo
 
-`/demo/*`只有在非生产环境且显式`ENABLE_DEMO=true`时存在；生产OpenAPI中不得出现。
+`/demo/*`只有在非生产环境且显式`ENABLE_DEMO=true`时存在；生产OpenAPI中不得出现。生产登录页不得显示演示账号和密码。
 
 ## 3. 计划接口（planned）
 
@@ -90,7 +146,8 @@
 |---|---|
 | AUTH_001 | 未认证或令牌无效 |
 | AUTH_002 | 角色权限不足 |
-| AUTH_003 | 登录凭据错误 |
+| AUTH_003 | 邮箱已注册 |
+| AUTH_004 | 账号、密码或登录身份不匹配 |
 | FAMILY_001 | 跨家庭或非本人资源 |
 | DOC_001 | 文件类型/大小不支持 |
 | DOC_002 | 文档状态不允许操作 |
@@ -105,4 +162,5 @@
 - OpenAPI是当前可用接口事实来源；
 - 文档不得把planned写成available；
 - 前端类型后续从OpenAPI生成；
-- 请求/响应破坏性变更必须增加API版本或兼容期。
+- 请求/响应破坏性变更必须增加API版本或兼容期；
+- 统计接口必须注明口径，不允许用前端常量替代后端业务数据。
