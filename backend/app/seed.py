@@ -1,101 +1,125 @@
+from __future__ import annotations
+
+import hashlib
+from datetime import datetime, timezone
+from decimal import Decimal
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Question, Student, Textbook
+from app.core.security import hash_password
+from app.models import (
+    Family,
+    FamilyMember,
+    Question,
+    QuestionAnswerRule,
+    QuestionOption,
+    QuestionResponseField,
+    QuestionVersion,
+    Student,
+    User,
+)
+
+
+def _checksum(*parts: str) -> str:
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
 def seed_demo_data(db: Session) -> None:
-    if db.scalar(select(Student.id).limit(1)) is None:
-        db.add(
-            Student(
-                nickname="林小雨",
-                school_system="6-3",
-                current_grade=5,
-                current_term="2026-2027 第一学期",
-                region="广东省广州市",
-                daily_minutes_limit=50,
-            )
-        )
+    if db.scalar(select(User.id).where(User.email == "parent@example.com")):
+        return
 
-    if db.scalar(select(Textbook.id).limit(1)) is None:
-        db.add_all(
-            [
-                Textbook(
-                    subject="语文",
-                    publisher="人民教育出版社",
-                    version_name="统编版",
-                    revision_year=2024,
-                    grade=5,
-                    volume="上册",
-                ),
-                Textbook(
-                    subject="数学",
-                    publisher="人民教育出版社",
-                    version_name="人教版",
-                    revision_year=2024,
-                    grade=5,
-                    volume="上册",
-                ),
-                Textbook(
-                    subject="英语",
-                    publisher="外语教学与研究出版社",
-                    version_name="外研版",
-                    revision_year=2024,
-                    grade=5,
-                    volume="上册",
-                ),
-            ]
-        )
+    parent = User(email="parent@example.com", password_hash=hash_password("Parent123!"), role="parent", display_name="演示家长")
+    student_user = User(email="student@example.com", password_hash=hash_password("Student123!"), role="student", display_name="林小雨")
+    admin = User(email="admin@example.com", password_hash=hash_password("Admin123!"), role="admin", display_name="平台管理员")
+    db.add_all([parent, student_user, admin])
+    db.flush()
 
-    if db.scalar(select(Question.id).limit(1)) is None:
-        db.add_all(
-            [
-                Question(
-                    question_code="Q-M5-102846",
-                    subject="数学",
-                    grade=5,
-                    knowledge_point="分数应用题",
-                    question_type="single_choice",
-                    difficulty=2,
-                    cognitive_level="application",
-                    stem="一本书共有120页，小明第一天看了全书的1/4，第二天看了剩下部分的1/3。第二天看了多少页？",
-                    options={"A": "20页", "B": "30页", "C": "40页", "D": "45页"},
-                    answer={"selected": ["B"]},
-                    explanation="第一天看30页，剩90页；第二天看90×1/3=30页。",
-                    hints=["先求第一天看了多少页", "再求剩下多少页", "第二天看剩下部分的1/3"],
-                    estimated_seconds=180,
-                ),
-                Question(
-                    question_code="Q-M5-102847",
-                    subject="数学",
-                    grade=5,
-                    knowledge_point="分数应用题",
-                    question_type="single_choice",
-                    difficulty=2,
-                    cognitive_level="variant_application",
-                    stem="一桶油有90千克，第一次用去1/3，第二次用去剩余的1/2。第二次用去多少千克？",
-                    options={"A": "15千克", "B": "30千克", "C": "45千克", "D": "60千克"},
-                    answer={"selected": ["B"]},
-                    explanation="第一次用30千克，剩60千克；第二次用60×1/2=30千克。",
-                    hints=["注意第二次的单位1是剩余部分"],
-                    estimated_seconds=150,
-                ),
-                Question(
-                    question_code="Q-E5-083521",
-                    subject="英语",
-                    grade=5,
-                    knowledge_point="第三人称单数",
-                    question_type="single_choice",
-                    difficulty=1,
-                    cognitive_level="understanding",
-                    stem="She ___ to school on Monday.",
-                    options={"A": "go", "B": "goes", "C": "going", "D": "went"},
-                    answer={"selected": ["B"]},
-                    explanation="一般现在时中，主语She是第三人称单数，动词go变为goes。",
-                    hints=["观察主语是She"],
-                    estimated_seconds=60,
-                ),
-            ]
-        )
+    family = Family(name="林小雨家庭", primary_guardian_user_id=parent.id)
+    db.add(family)
+    db.flush()
+    db.add_all([
+        FamilyMember(family_id=family.id, user_id=parent.id, relation_type="guardian", is_primary_guardian=True, permissions={"manage_students": True, "confirm_documents": True}),
+        FamilyMember(family_id=family.id, user_id=student_user.id, relation_type="student", is_primary_guardian=False, permissions={"practice": True, "upload_documents": True}),
+    ])
+    student = Student(
+        family_id=family.id, user_id=student_user.id, nickname="林小雨", school_system="6-3",
+        current_grade=8, current_term="2026-2027 第一学期", region="广东省广州市",
+        daily_minutes_limit=50, created_by_user_id=parent.id,
+    )
+    db.add(student)
+    db.flush()
 
+    def add_question(code: str, display_type: str, stem: str, options: list[tuple[str, str]], field_type: str,
+                     rule_type: str, accepted: list, answer_summary: str, explanation: str,
+                     difficulty: int = 2, case_sensitive: bool = False) -> None:
+        question = Question(
+            question_code=code,
+            subject="数学" if code.startswith("MATH") else "英语",
+            base_grade=8,
+            lifecycle_status="active",
+            source_type="self_built",
+            copyright_status="owned",
+            created_by_user_id=admin.id,
+            first_published_at=datetime.now(timezone.utc),
+        )
+        db.add(question)
+        db.flush()
+        version = QuestionVersion(
+            question_id=question.id,
+            version_no=1,
+            display_type=display_type,
+            stem_content={"blocks": [{"type": "text", "value": stem}]},
+            explanation_content={"blocks": [{"type": "text", "value": explanation}]},
+            difficulty=difficulty,
+            cognitive_level="application",
+            estimated_seconds=120,
+            scoring_mode="rule",
+            total_score=Decimal("1.00"),
+            common_errors=[],
+            answer_summary=answer_summary,
+            content_checksum=_checksum(code, stem, answer_summary),
+            review_status="approved",
+            publication_status="published",
+            reviewed_by_user_id=admin.id,
+            reviewed_at=datetime.now(timezone.utc),
+            published_at=datetime.now(timezone.utc),
+        )
+        db.add(version)
+        db.flush()
+        for index, (key, value) in enumerate(options, start=1):
+            db.add(QuestionOption(
+                question_version_id=version.id,
+                option_key=key,
+                content={"blocks": [{"type": "text", "value": value}]},
+                sort_order=index,
+            ))
+        field = QuestionResponseField(
+            question_version_id=version.id,
+            field_key="answer",
+            field_type=field_type,
+            sort_order=1,
+            score_weight=Decimal("1.00"),
+            input_config={"math_keyboard": field_type == "math_expression"},
+        )
+        db.add(field)
+        db.flush()
+        db.add(QuestionAnswerRule(
+            response_field_id=field.id,
+            rule_type=rule_type,
+            accepted_values=accepted,
+            normalization_profile="math_zh_v1" if field_type == "math_expression" else "text_zh_v1",
+            case_sensitive=case_sensitive,
+            allow_fullwidth_equivalent=True,
+            parser_profile="math_basic_v1" if rule_type == "symbolic_equivalence" else None,
+        ))
+        question.current_version_id = version.id
+
+    add_question("MATH-G8-CHOICE-0001", "single_choice", "若一个三角形的两个内角分别为50°和60°，第三个内角是多少？",
+                 [("A", "60°"), ("B", "70°"), ("C", "80°"), ("D", "90°")], "single_choice",
+                 "choice_set", ["B"], "B", "三角形内角和为180°，第三个角为180°-50°-60°=70°。", 1)
+    add_question("MATH-G8-RADICAL-0001", "fill_blank", "化简：√27 = ____。", [], "math_expression",
+                 "symbolic_equivalence", ["3√3"], "3√3", "√27=√(9×3)=3√3。", 2)
+    add_question("ENG-G8-TEXT-0001", "fill_blank", "She ____ to school every Monday. (go)", [], "text",
+                 "normalized_text", ["goes"], "goes", "主语She为第三人称单数，go变为goes。", 1, False)
     db.commit()

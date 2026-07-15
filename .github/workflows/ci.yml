@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feature/**]
+    branches: [main, "feature/**", "release/**"]
   pull_request:
     branches: [main]
 
@@ -12,6 +12,14 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    env:
+      APP_ENV: test
+      DATABASE_URL: sqlite:///./ci.db
+      SECRET_KEY: ci-secret-key-that-is-long-enough-for-tests
+      ENABLE_DEMO: "false"
+      AUTO_CREATE_SCHEMA: "false"
+      SEED_DEMO_DATA: "false"
+      FILE_STORAGE_PATH: /tmp/xueji-ci-uploads
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,7 +28,11 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
-      - run: pytest -q
+      - run: ruff check app tests migrations
+      - run: bandit -q -r app -x tests -s B105,B106
+      - run: alembic upgrade head
+      - run: alembic downgrade base
+      - run: pytest --cov=app --cov-report=term-missing --cov-fail-under=60
 
   frontend:
     runs-on: ubuntu-latest
