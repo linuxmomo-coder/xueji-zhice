@@ -47,7 +47,7 @@
 
 ```bash
 cp .env.example .env
-docker compose -f deployment/docker-compose.yml up --build
+docker compose --env-file .env -f deployment/docker-compose.yml up --build
 ```
 
 后端容器启动时自动执行：
