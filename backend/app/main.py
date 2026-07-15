@@ -27,7 +27,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="学迹智评 v0.2：真实身份与家庭隔离、题库版本、可审计练习判题闭环。",
+    description="学迹智评 v0.2.1：角色登录、实时数据工作台与可审计学习闭环。",
     lifespan=lifespan,
 )
 app.add_middleware(RequestContextMiddleware)
