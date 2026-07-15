@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.utils import success
@@ -23,11 +24,40 @@ def question_payload(question: Question, version: QuestionVersion) -> dict:
         "cognitive_level": version.cognitive_level,
         "stem": version.stem_content,
         "options": [
-            {"key": option.option_key, "content": option.content, "sort_order": option.sort_order}
+            {
+                "key": option.option_key,
+                "content": option.content,
+                "sort_order": option.sort_order,
+            }
             for option in sorted(version.options, key=lambda item: item.sort_order)
         ],
         "estimated_seconds": version.estimated_seconds,
     }
+
+
+@router.get("/subjects")
+def list_available_subjects(
+    request: Request,
+    grade: int = Query(ge=1, le=12),
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    rows = db.execute(
+        select(Question.subject, func.count(Question.id))
+        .join(QuestionVersion, Question.current_version_id == QuestionVersion.id)
+        .where(
+            Question.lifecycle_status == "active",
+            Question.base_grade == grade,
+            QuestionVersion.review_status == "approved",
+            QuestionVersion.publication_status == "published",
+        )
+        .group_by(Question.subject)
+        .order_by(Question.subject)
+    ).all()
+    return success(
+        request,
+        [{"subject": subject, "question_count": count} for subject, count in rows],
+    )
 
 
 @router.get("")
