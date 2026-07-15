@@ -42,6 +42,7 @@ def login_user(payload: LoginRequest, request: Request, db: Session = Depends(ge
         db,
         email=str(payload.email),
         password=payload.password,
+        role=payload.role,
         user_agent=request.headers.get("User-Agent"),
     )
     return success(request, _token_payload(user, access, refresh, family_id))
