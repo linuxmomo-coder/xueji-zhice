@@ -16,7 +16,7 @@ cd frontend && npm install && npm run dev
 完整容器：
 
 ```bash
-docker compose -f deployment/docker-compose.yml up --build
+docker compose --env-file .env -f deployment/docker-compose.yml up --build
 ```
 
 ## 3. 生产配置
