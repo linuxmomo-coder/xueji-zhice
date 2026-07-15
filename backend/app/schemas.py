@@ -35,6 +35,7 @@ class RegisterParentRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    role: Literal["parent", "student", "admin"]
 
 
 class RefreshRequest(BaseModel):
