@@ -64,10 +64,22 @@ def register_parent(
     return user, access_token, refresh_token, family.id
 
 
-def login(db: Session, *, email: str, password: str, user_agent: str | None) -> tuple[User, str, str, str | None]:
+def login(
+    db: Session,
+    *,
+    email: str,
+    password: str,
+    role: str,
+    user_agent: str | None,
+) -> tuple[User, str, str, str | None]:
     user = get_by_email(db, email)
-    if not user or user.status != "active" or not verify_password(password, user.password_hash):
-        raise ApiError(401, "AUTH_004", "邮箱或密码错误")
+    if (
+        not user
+        or user.status != "active"
+        or user.role != role
+        or not verify_password(password, user.password_hash)
+    ):
+        raise ApiError(401, "AUTH_004", "账号、密码或登录身份不匹配")
     user.last_login_at = datetime.now(timezone.utc)
     access_token, refresh_token, family_id = issue_tokens(db, user, user_agent)
     db.commit()
