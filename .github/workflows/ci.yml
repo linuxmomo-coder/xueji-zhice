@@ -52,6 +52,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cp .env.example .env
-      - run: docker compose -f deployment/docker-compose.yml config
+      - run: docker compose --env-file .env -f deployment/docker-compose.yml config
       - run: docker build -t xueji-zhice-backend ./backend
       - run: docker build -t xueji-zhice-frontend ./frontend
