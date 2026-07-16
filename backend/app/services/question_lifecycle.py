@@ -72,12 +72,14 @@ def save_question_asset(
         sha256=digest,
         alt_text=(alt_text or Path(original_name).stem)[:500],
         source_url=source_url,
-        source_metadata={"uploaded_by_user_id": uploaded_by_user_id, "original_name": Path(original_name).name},
+        source_metadata={
+            "uploaded_by_user_id": uploaded_by_user_id,
+            "original_name": Path(original_name).name,
+        },
         status="active",
     )
     db.add(asset)
-    db.commit()
-    db.refresh(asset)
+    db.flush()
     return asset
 
 
@@ -120,8 +122,7 @@ def link_asset(
         display_config=display_config,
     )
     db.add(link)
-    db.commit()
-    db.refresh(link)
+    db.flush()
     return link
 
 
@@ -154,8 +155,7 @@ def review_question_version(
         findings=findings,
     )
     db.add(review)
-    db.commit()
-    db.refresh(review)
+    db.flush()
     return review
 
 
@@ -198,14 +198,12 @@ def publish_question_version(
     question.lifecycle_status = "active"
     if question.first_published_at is None:
         question.first_published_at = now
-    db.commit()
-    db.refresh(version)
+    db.flush()
     return version
 
 
 def suspend_question(db: Session, *, question: Question, reason: str) -> Question:
     question.lifecycle_status = "suspended"
     question.suspended_reason = reason[:200]
-    db.commit()
-    db.refresh(question)
+    db.flush()
     return question
