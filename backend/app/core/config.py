@@ -14,6 +14,7 @@ INSECURE_SECRET_VALUES = {
     "local-development-secret-change-before-production",
 }
 INSECURE_PASSWORD_VALUES = {"change-me", "password", "123456", "local-dev-password", "CHANGE_ME"}
+AI_PROVIDERS = {"disabled", "bailian_openai", "hunyuan_openai"}
 
 
 class Settings(BaseSettings):
@@ -73,10 +74,16 @@ class Settings(BaseSettings):
     ai_enabled: bool = False
     ai_primary_provider: str = "disabled"
     ai_fallback_provider: str = "disabled"
+    ai_queue_name: str = "xueji:ai:reports"
+    ai_timeout_seconds: int = Field(default=90, ge=10, le=300)
+    ai_max_attempts: int = Field(default=2, ge=1, le=5)
+    ai_prompt_version: str = "learning-report-v1"
+    ai_max_input_chars: int = Field(default=30000, ge=2000, le=100000)
+    dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     dashscope_api_key: str | None = None
     bailian_model: str = "qwen-plus"
-    hunyuan_secret_id: str | None = None
-    hunyuan_secret_key: str | None = None
+    hunyuan_base_url: str = "https://api.hunyuan.cloud.tencent.com/v1"
+    hunyuan_api_key: str | None = None
     hunyuan_model: str = "hunyuan-turbos-latest"
 
     model_config = SettingsConfigDict(
@@ -118,6 +125,14 @@ class Settings(BaseSettings):
             raise ValueError("OCR_PROVIDER 必须为 disabled 或 paddle_http")
         return normalized
 
+    @field_validator("ai_primary_provider", "ai_fallback_provider")
+    @classmethod
+    def normalize_ai_provider(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in AI_PROVIDERS:
+            raise ValueError("AI提供方必须为 disabled/bailian_openai/hunyuan_openai")
+        return normalized
+
     @field_validator("cookie_samesite")
     @classmethod
     def normalize_cookie_samesite(cls, value: str) -> str:
@@ -137,6 +152,22 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
+
+    def _validate_ai_provider(self, provider: str, label: str, errors: list[str]) -> None:
+        if provider == "bailian_openai":
+            if not self.dashscope_api_key:
+                errors.append(f"{label}百炼提供方缺少 DASHSCOPE_API_KEY")
+            if not self.dashscope_base_url.startswith("https://"):
+                errors.append(f"{label}百炼地址必须使用HTTPS")
+            if not self.bailian_model:
+                errors.append(f"{label}百炼模型未配置")
+        elif provider == "hunyuan_openai":
+            if not self.hunyuan_api_key:
+                errors.append(f"{label}混元提供方缺少 HUNYUAN_API_KEY")
+            if not self.hunyuan_base_url.startswith("https://"):
+                errors.append(f"{label}混元地址必须使用HTTPS")
+            if not self.hunyuan_model:
+                errors.append(f"{label}混元模型未配置")
 
     def validate_runtime(self) -> None:
         errors: list[str] = []
@@ -192,7 +223,17 @@ class Settings(BaseSettings):
             elif self.ocr_provider != "disabled":
                 errors.append("OCR_ENABLED=false 时 OCR_PROVIDER 必须为 disabled")
             if self.ai_enabled:
-                errors.append("v0.3.0尚未交付真实AI报告适配器，生产环境必须关闭 AI_ENABLED")
+                if self.ai_primary_provider == "disabled":
+                    errors.append("启用AI时必须配置主模型提供方")
+                self._validate_ai_provider(self.ai_primary_provider, "主", errors)
+                if self.ai_fallback_provider != "disabled":
+                    self._validate_ai_provider(self.ai_fallback_provider, "备用", errors)
+                if self.ai_fallback_provider == self.ai_primary_provider and self.ai_fallback_provider != "disabled":
+                    errors.append("AI备用提供方必须与主提供方不同")
+                if not self.redis_url:
+                    errors.append("启用AI时必须配置 Redis 队列")
+            elif self.ai_primary_provider != "disabled" or self.ai_fallback_provider != "disabled":
+                errors.append("AI_ENABLED=false 时AI提供方必须为 disabled")
 
         if errors:
             raise RuntimeError("；".join(errors))
