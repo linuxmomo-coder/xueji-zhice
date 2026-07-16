@@ -65,7 +65,7 @@ async function refreshAuth(auth: AuthData): Promise<AuthData | null> {
   return refreshPromise;
 }
 
-async function request<T>(
+async function request(
   path: string,
   options: RequestInit,
   auth: AuthData | null
@@ -81,13 +81,13 @@ export async function api<T>(
   options: RequestInit = {},
   auth: AuthData | null = getStoredAuth()
 ): Promise<ApiEnvelope<T>> {
-  let activeAuth = auth;
-  let response = await request<T>(path, options, activeAuth);
+  let activeAuth = getStoredAuth() ?? auth;
+  let response = await request(path, options, activeAuth);
 
   const canRefresh = response.status === 401 && activeAuth?.refresh_token && path !== "/auth/refresh";
   if (canRefresh) {
     activeAuth = await refreshAuth(activeAuth);
-    if (activeAuth) response = await request<T>(path, options, activeAuth);
+    if (activeAuth) response = await request(path, options, activeAuth);
     else storeAuth(null);
   }
 
