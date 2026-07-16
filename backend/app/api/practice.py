@@ -12,6 +12,7 @@ from app.dependencies import get_accessible_student, get_current_user
 from app.models import PracticeItem, PracticeSession, Question, Student, User, WrongQuestion
 from app.repositories.questions import get_published_version
 from app.schemas import AnswerSubmitRequest, PracticeCreateRequest, PracticeRead, WrongQuestionDetail, WrongQuestionRead
+from app.services.legal import require_family_child_consent
 from app.services.practice import create_retest_session, create_session, get_next_item, submit_answer
 
 router = APIRouter(tags=["练习与错题"])
@@ -42,6 +43,7 @@ def create_practice(
     db: Session = Depends(get_db),
 ) -> dict:
     student = get_accessible_student(payload.student_id, current_user, db)
+    require_family_child_consent(db, student.family_id)
     if payload.practice_type == "retest":
         raise ApiError(422, "PRACTICE_007", "原题复测必须从错题记录发起")
     session = create_session(
@@ -73,6 +75,7 @@ def next_question(
     db: Session = Depends(get_db),
 ) -> dict:
     session = _session_for_user(db, session_id, current_user)
+    require_family_child_consent(db, session.family_id)
     item = get_next_item(db, session)
     if not item:
         return success(request, None, completed=True)
@@ -113,6 +116,7 @@ def answer_question(
     db: Session = Depends(get_db),
 ) -> dict:
     session = _session_for_user(db, session_id, current_user)
+    require_family_child_consent(db, session.family_id)
     item = db.get(PracticeItem, payload.practice_item_id)
     if not item:
         raise ApiError(404, "PRACTICE_005", "练习题不存在")
@@ -182,6 +186,7 @@ def retest_wrong_question(
     db: Session = Depends(get_db),
 ) -> dict:
     student = get_accessible_student(student_id, current_user, db)
+    require_family_child_consent(db, student.family_id)
     wrong = db.get(WrongQuestion, wrong_question_id)
     if not wrong or wrong.student_id != student.id:
         raise ApiError(404, "PRACTICE_008", "错题记录不存在")
