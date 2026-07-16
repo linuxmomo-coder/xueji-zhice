@@ -7,7 +7,26 @@ on:
     branches: [main]
 
 jobs:
-  backend:
+  backend-unit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - run: pip install -q -r requirements-dev.txt
+      - run: ruff check app tests migrations
+      - run: bandit -q -r app -x tests -s B105,B106
+      - run: pytest -q --tb=short --cov=app --cov-report=term-missing --cov-fail-under=65
+
+  backend-migrations:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -45,17 +64,12 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: |
-            backend/requirements.txt
-            backend/requirements-dev.txt
-      - run: pip install -r requirements-dev.txt
-      - run: ruff check app tests migrations
-      - run: bandit -q -r app -x tests -s B105,B106
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -q -r requirements.txt
       - run: alembic upgrade head
       - run: python -c "from sqlalchemy import create_engine, inspect; from app.core.config import settings; names=inspect(create_engine(settings.database_url)).get_table_names(); assert 'users' in names and 'question_answer_rules' in names and 'audit_events' in names, names"
       - run: alembic downgrade base
       - run: alembic upgrade head
-      - run: pytest --cov=app --cov-report=term-missing --cov-fail-under=65
 
   frontend:
     runs-on: ubuntu-latest
