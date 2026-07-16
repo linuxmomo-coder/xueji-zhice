@@ -84,8 +84,12 @@ export async function api<T>(
   let activeAuth = getStoredAuth() ?? auth;
   let response = await request(path, options, activeAuth);
 
-  const canRefresh = response.status === 401 && activeAuth?.refresh_token && path !== "/auth/refresh";
-  if (canRefresh) {
+  if (
+    response.status === 401 &&
+    activeAuth !== null &&
+    activeAuth.refresh_token.length > 0 &&
+    path !== "/auth/refresh"
+  ) {
     activeAuth = await refreshAuth(activeAuth);
     if (activeAuth) response = await request(path, options, activeAuth);
     else storeAuth(null);
