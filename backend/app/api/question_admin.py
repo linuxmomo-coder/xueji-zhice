@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.utils import success
+from app.core.config import settings
 from app.core.errors import ApiError
 from app.db.session import get_db
 from app.dependencies import require_roles
@@ -14,7 +15,6 @@ from app.models import (
     Question,
     QuestionImportBatch,
     QuestionImportRow,
-    QuestionReview,
     QuestionSource,
     QuestionVersion,
     User,
@@ -41,6 +41,10 @@ router = APIRouter(prefix="/admin", tags=["题库管理"])
 MAX_XLSX_BYTES = 20 * 1024 * 1024
 
 
+def _require_admin_email(db: Session, user: User) -> None:
+    require_verified_email(db, user)
+
+
 @router.post("/question-imports/upload", status_code=status.HTTP_201_CREATED)
 async def upload_question_import(
     request: Request,
@@ -48,7 +52,7 @@ async def upload_question_import(
     current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> dict:
-    require_verified_email(db, current_user)
+    _require_admin_email(db, current_user)
     file_name = Path(file.filename or "questions.xlsx").name
     if not file_name.lower().endswith(".xlsx"):
         raise ApiError(415, "IMPORT_004", "仅支持.xlsx题库文件")
@@ -96,7 +100,7 @@ def list_question_imports(
             .limit(page_size)
         ).all()
     )
-    total = len(list(db.scalars(select(QuestionImportBatch.id)).all()))
+    total = db.scalar(select(func.count(QuestionImportBatch.id))) or 0
     return success(
         request,
         [QuestionImportBatchRead.model_validate(row).model_dump() for row in rows],
@@ -139,7 +143,7 @@ def commit_question_import(
     current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> dict:
-    require_verified_email(db, current_user)
+    _require_admin_email(db, current_user)
     batch = db.get(QuestionImportBatch, batch_id)
     if not batch:
         raise ApiError(404, "IMPORT_006", "导入批次不存在")
@@ -196,14 +200,18 @@ def list_question_versions_for_review(
                 "answer_summary": version.answer_summary,
                 "review_status": version.review_status,
                 "publication_status": version.publication_status,
-                "source": {
-                    "id": source.id,
-                    "copyright_status": source.copyright_status,
-                    "review_status": source.review_status,
-                    "source_name": source.source_name,
-                    "source_url": source.source_url,
-                    "metadata": source.metadata_json,
-                } if source else None,
+                "source": (
+                    {
+                        "id": source.id,
+                        "copyright_status": source.copyright_status,
+                        "review_status": source.review_status,
+                        "source_name": source.source_name,
+                        "source_url": source.source_url,
+                        "metadata": source.metadata_json,
+                    }
+                    if source
+                    else None
+                ),
             }
         )
     return success(request, data, total=len(data))
@@ -217,7 +225,7 @@ def review_version(
     current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> dict:
-    require_verified_email(db, current_user)
+    _require_admin_email(db, current_user)
     version = db.get(QuestionVersion, version_id)
     if not version:
         raise ApiError(404, "BANK_002", "题目版本不存在")
@@ -261,7 +269,7 @@ def publish_version(
     current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> dict:
-    require_verified_email(db, current_user)
+    _require_admin_email(db, current_user)
     version = db.get(QuestionVersion, version_id)
     if not version:
         raise ApiError(404, "BANK_002", "题目版本不存在")
@@ -274,7 +282,10 @@ def publish_version(
         resource_type="question_version",
         resource_id=version.id,
         request_id=request.state.request_id,
-        after_data={"publication_status": version.publication_status, "published_at": version.published_at.isoformat() if version.published_at else None},
+        after_data={
+            "publication_status": version.publication_status,
+            "published_at": version.published_at.isoformat() if version.published_at else None,
+        },
     )
     db.commit()
     return success(
@@ -298,7 +309,7 @@ async def upload_question_asset(
     current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> dict:
-    require_verified_email(db, current_user)
+    _require_admin_email(db, current_user)
     content = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
     asset = save_question_asset(
         db,
@@ -340,7 +351,7 @@ def link_question_asset(
     current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> dict:
-    require_verified_email(db, current_user)
+    _require_admin_email(db, current_user)
     link = link_asset(
         db,
         question_version_id=version_id,
@@ -362,7 +373,10 @@ def link_question_asset(
         after_data={"question_version_id": version_id, "asset_id": payload.asset_id},
     )
     db.commit()
-    return success(request, {"id": link.id, "question_version_id": version_id, "asset_id": payload.asset_id})
+    return success(
+        request,
+        {"id": link.id, "question_version_id": version_id, "asset_id": payload.asset_id},
+    )
 
 
 @router.post("/questions/{question_id}/suspend")
@@ -373,7 +387,7 @@ def suspend_published_question(
     current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> dict:
-    require_verified_email(db, current_user)
+    _require_admin_email(db, current_user)
     question = db.get(Question, question_id)
     if not question:
         raise ApiError(404, "BANK_001", "题目不存在")
@@ -389,4 +403,11 @@ def suspend_published_question(
         after_data={"reason": reason},
     )
     db.commit()
-    return success(request, {"id": question.id, "lifecycle_status": question.lifecycle_status, "reason": question.suspended_reason})
+    return success(
+        request,
+        {
+            "id": question.id,
+            "lifecycle_status": question.lifecycle_status,
+            "reason": question.suspended_reason,
+        },
+    )
