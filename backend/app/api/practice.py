@@ -9,9 +9,10 @@ from app.api.utils import success
 from app.core.errors import ApiError
 from app.db.session import get_db
 from app.dependencies import get_accessible_student, get_current_user
-from app.models import PracticeItem, PracticeSession, Question, QuestionVersion, Student, User, WrongQuestion
-from app.schemas import AnswerSubmitRequest, PracticeCreateRequest, PracticeRead, WrongQuestionRead
-from app.services.practice import create_session, get_next_item, submit_answer
+from app.models import PracticeItem, PracticeSession, Question, Student, User, WrongQuestion
+from app.repositories.questions import get_published_version
+from app.schemas import AnswerSubmitRequest, PracticeCreateRequest, PracticeRead, WrongQuestionDetail, WrongQuestionRead
+from app.services.practice import create_retest_session, create_session, get_next_item, submit_answer
 
 router = APIRouter(tags=["练习与错题"])
 
@@ -41,6 +42,8 @@ def create_practice(
     db: Session = Depends(get_db),
 ) -> dict:
     student = get_accessible_student(payload.student_id, current_user, db)
+    if payload.practice_type == "retest":
+        raise ApiError(422, "PRACTICE_007", "原题复测必须从错题记录发起")
     session = create_session(
         db,
         student=student,
@@ -74,18 +77,29 @@ def next_question(
     if not item:
         return success(request, None, completed=True)
     question = db.get(Question, item.question_id)
-    version = db.get(QuestionVersion, item.question_version_id)
-    if not question or not version:
-        raise ApiError(409, "BANK_002", "题目版本不存在")
-    version.options
+    if not question:
+        raise ApiError(409, "BANK_002", "题目不存在")
+    version = get_published_version(db, question)
+    if not version or version.id != item.question_version_id:
+        snapshot = item.question_snapshot
+        payload = {
+            "id": item.question_id,
+            "question_code": snapshot["question_code"],
+            "subject": snapshot["subject"],
+            "grade": snapshot["grade"],
+            "display_type": snapshot["display_type"],
+            "difficulty": snapshot["difficulty"],
+            "cognitive_level": snapshot["cognitive_level"],
+            "stem": snapshot["stem"],
+            "options": snapshot["options"],
+            "assets": [],
+            "estimated_seconds": snapshot["estimated_seconds"],
+        }
+    else:
+        payload = question_payload(question, version, db)
     return success(
         request,
-        {
-            "id": item.id,
-            "sequence_no": item.sequence_no,
-            "status": item.status,
-            "question": question_payload(question, version),
-        },
+        {"id": item.id, "sequence_no": item.sequence_no, "status": item.status, "question": payload},
         completed=False,
     )
 
@@ -117,7 +131,13 @@ def answer_question(
             "is_correct": attempt.is_correct,
             "score": str(attempt.score),
             "normalized_answer": attempt.answer_normalized,
-            "feedback": "回答正确" if attempt.is_correct else "答案不正确，已加入错题复习",
+            "feedback": (
+                "答案格式或表达式需要人工复核"
+                if attempt.evaluation.get("manual_review_required")
+                else "回答正确"
+                if attempt.is_correct
+                else "答案不正确，已加入错题复习"
+            ),
             "wrong_question_state": wrong.state if wrong else None,
         },
     )
@@ -138,4 +158,32 @@ def list_wrong_questions(
             .order_by(WrongQuestion.last_wrong_at.desc())
         ).all()
     )
-    return success(request, [WrongQuestionRead.model_validate(row).model_dump() for row in rows])
+    data: list[dict] = []
+    for row in rows:
+        question = db.get(Question, row.question_id)
+        version = get_published_version(db, question) if question else None
+        if not question or not version:
+            continue
+        data.append(
+            WrongQuestionDetail(
+                wrong_question=WrongQuestionRead.model_validate(row),
+                question=question_payload(question, version, db),
+            ).model_dump()
+        )
+    return success(request, data)
+
+
+@router.post("/students/{student_id}/wrong-questions/{wrong_question_id}/retest", status_code=status.HTTP_201_CREATED)
+def retest_wrong_question(
+    student_id: str,
+    wrong_question_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    student = get_accessible_student(student_id, current_user, db)
+    wrong = db.get(WrongQuestion, wrong_question_id)
+    if not wrong or wrong.student_id != student.id:
+        raise ApiError(404, "PRACTICE_008", "错题记录不存在")
+    session = create_retest_session(db, student=student, wrong_question=wrong)
+    return success(request, PracticeRead.model_validate(session).model_dump())
