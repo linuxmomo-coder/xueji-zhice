@@ -8,7 +8,7 @@ from app.core.config import Settings
 def test_health(client) -> None:
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["version"] == "0.2.1"
+    assert response.json()["version"] == "0.2.2"
 
 
 def test_production_fails_with_insecure_defaults() -> None:
