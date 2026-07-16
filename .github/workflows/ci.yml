@@ -82,7 +82,7 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: pip install -q -r requirements.txt
       - run: alembic upgrade head
-      - run: python -c "from sqlalchemy import create_engine, inspect; from app.core.config import settings; names=inspect(create_engine(settings.database_url)).get_table_names(); assert 'users' in names and 'account_tokens' in names and 'guardian_consents' in names and 'question_answer_rules' in names and 'audit_events' in names, names"
+      - run: python -c "from sqlalchemy import create_engine, inspect; from app.core.config import settings; names=inspect(create_engine(settings.database_url)).get_table_names(); assert 'users' in names and 'account_tokens' in names and 'guardian_consents' in names and 'question_import_batches' in names and 'question_import_rows' in names and 'question_reviews' in names and 'question_sources' in names and 'question_answer_rules' in names and 'audit_events' in names, names"
       - run: alembic downgrade base
       - run: alembic upgrade head
 
