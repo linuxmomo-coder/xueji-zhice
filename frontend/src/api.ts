@@ -43,6 +43,8 @@ export function storeAuth(auth: AuthData | null): void {
   localStorage.removeItem(STORAGE_KEY);
   if (auth) sessionStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
   else sessionStorage.removeItem(STORAGE_KEY);
+  if (auth) window.dispatchEvent(new CustomEvent<AuthData>("xueji-auth-updated", { detail: auth }));
+  else window.dispatchEvent(new Event("xueji-auth-expired"));
 }
 
 async function parseError(response: Response): Promise<Error> {
@@ -66,17 +68,14 @@ async function refreshAccessToken(): Promise<AuthData | null> {
       .then(async (response) => {
         if (!response.ok) {
           storeAuth(null);
-          window.dispatchEvent(new Event("xueji-auth-expired"));
           return null;
         }
         const payload = (await response.json()) as ApiEnvelope<AuthData>;
         storeAuth(payload.data);
-        window.dispatchEvent(new CustomEvent<AuthData>("xueji-auth-updated", { detail: payload.data }));
         return payload.data;
       })
       .catch(() => {
         storeAuth(null);
-        window.dispatchEvent(new Event("xueji-auth-expired"));
         return null;
       })
       .finally(() => {
