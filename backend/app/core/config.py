@@ -45,6 +45,18 @@ class Settings(BaseSettings):
     storage_secret_key: str | None = None
     storage_presign_seconds: int = Field(default=300, ge=60, le=3600)
 
+    require_email_verification: bool = False
+    email_provider: str = "disabled"
+    smtp_host: str | None = None
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str | None = None
+    smtp_starttls: bool = True
+    frontend_public_url: str = "http://localhost"
+    email_verification_hours: int = Field(default=24, ge=1, le=168)
+    password_reset_minutes: int = Field(default=30, ge=5, le=120)
+
     enable_demo: bool = False
     auto_create_schema: bool = False
     seed_demo_data: bool = False
@@ -82,6 +94,14 @@ class Settings(BaseSettings):
         normalized = value.strip().lower()
         if normalized not in {"local", "s3"}:
             raise ValueError("STORAGE_PROVIDER 必须为 local 或 s3")
+        return normalized
+
+    @field_validator("email_provider")
+    @classmethod
+    def normalize_email_provider(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"disabled", "smtp"}:
+            raise ValueError("EMAIL_PROVIDER 必须为 disabled 或 smtp")
         return normalized
 
     @field_validator("cookie_samesite")
@@ -131,6 +151,21 @@ class Settings(BaseSettings):
             missing_storage = [name for name, value in required_storage.items() if not value]
             if missing_storage:
                 errors.append(f"对象存储缺少配置：{', '.join(missing_storage)}")
+            if not self.require_email_verification:
+                errors.append("生产环境必须开启 REQUIRE_EMAIL_VERIFICATION")
+            if self.email_provider != "smtp":
+                errors.append("生产环境必须配置 SMTP 邮件服务")
+            required_email = {
+                "SMTP_HOST": self.smtp_host,
+                "SMTP_FROM_EMAIL": self.smtp_from_email,
+            }
+            if self.smtp_username and not self.smtp_password:
+                required_email["SMTP_PASSWORD"] = self.smtp_password
+            missing_email = [name for name, value in required_email.items() if not value]
+            if missing_email:
+                errors.append(f"邮件服务缺少配置：{', '.join(missing_email)}")
+            if not self.frontend_public_url.startswith("https://"):
+                errors.append("生产环境 FRONTEND_PUBLIC_URL 必须使用 HTTPS")
             if self.ocr_enabled:
                 errors.append("v0.3.0尚未交付真实OCR适配器，生产环境必须关闭 OCR_ENABLED")
             if self.ai_enabled:
