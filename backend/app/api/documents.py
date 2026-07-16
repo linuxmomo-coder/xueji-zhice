@@ -18,6 +18,7 @@ from app.models import LearningDocument, User
 from app.schemas import DocumentConfirmRequest, DocumentRead
 from app.services.audit import add_audit_event
 from app.services.legal import require_family_child_consent
+from app.services.recovery import require_verified_email
 from app.services.storage import storage
 
 router = APIRouter(prefix="/documents", tags=["学习资料"])
@@ -55,6 +56,7 @@ async def upload_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    require_verified_email(db, current_user)
     student = get_accessible_student(student_id, current_user, db)
     require_family_child_consent(db, student.family_id)
     if document_type not in ALLOWED_DOCUMENT_TYPES:
@@ -161,6 +163,7 @@ def confirm_document(
     current_user: User = Depends(require_roles("parent")),
     db: Session = Depends(get_db),
 ) -> dict:
+    require_verified_email(db, current_user)
     document = db.get(LearningDocument, document_id)
     if not document:
         raise ApiError(404, "DOC_006", "资料不存在")
