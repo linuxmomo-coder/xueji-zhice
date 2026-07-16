@@ -111,7 +111,7 @@ def seed_demo_data(db: Session) -> None:
             normalization_profile="math_zh_v1" if field_type == "math_expression" else "text_zh_v1",
             case_sensitive=case_sensitive,
             allow_fullwidth_equivalent=True,
-            parser_profile="math_basic_v1" if rule_type == "symbolic_equivalence" else None,
+            parser_profile="safe_ast_sympy" if rule_type == "symbolic_equivalence" else None,
         ))
         question.current_version_id = version.id
 
