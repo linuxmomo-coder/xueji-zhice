@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.utils import success
 from app.core.errors import ApiError
 from app.db.session import get_db
-from app.dependencies import current_family_id, get_current_user, require_roles
+from app.dependencies import current_family_id, require_roles
 from app.models import GuardianConsent, User
 from app.schemas_account import GuardianConsentInput, GuardianConsentRead
 from app.services.audit import add_audit_event
