@@ -11,6 +11,7 @@ from app.core.security import hash_password
 from app.models import (
     Family,
     FamilyMember,
+    GuardianConsent,
     Question,
     QuestionAnswerRule,
     QuestionOption,
@@ -18,6 +19,12 @@ from app.models import (
     QuestionVersion,
     Student,
     User,
+)
+from app.services.legal import (
+    CURRENT_CHILD_POLICY_VERSION,
+    CURRENT_PRIVACY_VERSION,
+    CURRENT_TERMS_VERSION,
+    REQUIRED_CHILD_SCOPE,
 )
 
 
@@ -41,6 +48,18 @@ def seed_demo_data(db: Session) -> None:
     db.add_all([
         FamilyMember(family_id=family.id, user_id=parent.id, relation_type="guardian", is_primary_guardian=True, permissions={"manage_students": True, "confirm_documents": True}),
         FamilyMember(family_id=family.id, user_id=student_user.id, relation_type="student", is_primary_guardian=False, permissions={"practice": True, "upload_documents": True}),
+        GuardianConsent(
+            guardian_user_id=parent.id,
+            family_id=family.id,
+            student_id=None,
+            terms_version=CURRENT_TERMS_VERSION,
+            privacy_version=CURRENT_PRIVACY_VERSION,
+            child_policy_version=CURRENT_CHILD_POLICY_VERSION,
+            consent_scope=REQUIRED_CHILD_SCOPE,
+            accepted_at=datetime.now(timezone.utc),
+            ip_address="127.0.0.1",
+            user_agent="demo-seed",
+        ),
     ])
     student = Student(
         family_id=family.id, user_id=student_user.id, nickname="林小雨", school_system="6-3",
