@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, dashboard, demo, documents, practice, questions, students
+from app.api import account, auth, dashboard, demo, documents, legal, practice, questions, students
 from app.core.config import settings
 from app.core.errors import install_error_handlers
 from app.core.middleware import RequestContextMiddleware
@@ -27,7 +27,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="学迹智评 v0.3.0：生产安全基线、真实账号与可审计学习闭环。",
+    description="学迹智评 v0.3.0：生产安全基线、真实账号、监护人授权与可审计学习闭环。",
     docs_url="/docs" if settings.enable_api_docs else None,
     redoc_url=None,
     openapi_url="/openapi.json" if settings.enable_api_docs else None,
@@ -54,7 +54,16 @@ def health() -> dict[str, str]:
     }
 
 
-for router in [auth.router, dashboard.router, students.router, questions.router, practice.router, documents.router]:
+for router in [
+    auth.router,
+    account.router,
+    legal.router,
+    dashboard.router,
+    students.router,
+    questions.router,
+    practice.router,
+    documents.router,
+]:
     app.include_router(router, prefix=settings.api_prefix)
 if settings.enable_demo and not settings.is_production:
     app.include_router(demo.router, prefix=settings.api_prefix)
