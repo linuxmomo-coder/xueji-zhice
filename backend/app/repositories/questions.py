@@ -41,13 +41,19 @@ def get_published_version(db: Session, question: Question) -> QuestionVersion | 
     )
 
 
-def candidates(db: Session, subject: str, limit: int) -> list[tuple[Question, QuestionVersion]]:
+def candidates(
+    db: Session,
+    subject: str,
+    grade: int,
+    limit: int,
+) -> list[tuple[Question, QuestionVersion]]:
     questions = list(
         db.scalars(
             select(Question)
             .where(
                 Question.lifecycle_status == "active",
                 Question.subject == subject,
+                Question.base_grade == grade,
                 Question.current_version_id.is_not(None),
             )
             .order_by(Question.question_code)
