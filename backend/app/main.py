@@ -27,7 +27,10 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="学迹智评 v0.2.1：角色登录、实时数据工作台与可审计学习闭环。",
+    description="学迹智评 v0.3.0：生产安全基线、真实账号与可审计学习闭环。",
+    docs_url="/docs" if settings.enable_api_docs else None,
+    redoc_url=None,
+    openapi_url="/openapi.json" if settings.enable_api_docs else None,
     lifespan=lifespan,
 )
 app.add_middleware(RequestContextMiddleware)
