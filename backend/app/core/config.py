@@ -18,7 +18,7 @@ INSECURE_PASSWORD_VALUES = {"change-me", "password", "123456", "local-dev-passwo
 
 class Settings(BaseSettings):
     app_name: str = "学迹智评 API"
-    app_version: str = "0.2.1"
+    app_version: str = "0.2.2"
     app_env: str = "development"
     api_prefix: str = "/api/v1"
 
