@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class ORMModel(BaseModel):
@@ -47,3 +47,16 @@ class SessionRead(ORMModel):
     revoked_at: datetime | None
     user_agent: str | None
     created_at: datetime
+
+
+class EmailVerificationRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=300)
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(min_length=20, max_length=300)
+    new_password: str = Field(min_length=10, max_length=128)
