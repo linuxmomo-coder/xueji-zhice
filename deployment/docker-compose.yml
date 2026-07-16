@@ -13,6 +13,9 @@ services:
       timeout: 5s
       retries: 20
     restart: unless-stopped
+    mem_limit: 1g
+    logging:
+      options: {max-size: "10m", max-file: "5"}
     networks: [internal]
 
   redis:
@@ -26,6 +29,9 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+    mem_limit: 256m
+    logging:
+      options: {max-size: "10m", max-file: "5"}
     networks: [internal]
 
   backend:
@@ -50,12 +56,19 @@ services:
       timeout: 5s
       retries: 12
     restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.5
+    logging:
+      options: {max-size: "20m", max-file: "5"}
     networks: [internal]
 
   frontend:
     build:
       context: ../frontend
     restart: unless-stopped
+    mem_limit: 128m
+    logging:
+      options: {max-size: "10m", max-file: "3"}
     networks: [internal]
 
   nginx:
@@ -70,6 +83,9 @@ services:
       frontend:
         condition: service_started
     restart: unless-stopped
+    mem_limit: 128m
+    logging:
+      options: {max-size: "10m", max-file: "5"}
     networks: [internal]
 
 networks:
