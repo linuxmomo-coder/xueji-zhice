@@ -63,8 +63,14 @@ class Settings(BaseSettings):
 
     postgres_password: str | None = None
     ocr_enabled: bool = False
-    ai_enabled: bool = False
     ocr_provider: str = "disabled"
+    ocr_service_url: str | None = None
+    ocr_service_token: str | None = None
+    ocr_timeout_seconds: int = Field(default=60, ge=5, le=300)
+    ocr_queue_name: str = "xueji:ocr:jobs"
+    ocr_max_attempts: int = Field(default=3, ge=1, le=10)
+
+    ai_enabled: bool = False
     ai_primary_provider: str = "disabled"
     ai_fallback_provider: str = "disabled"
     dashscope_api_key: str | None = None
@@ -102,6 +108,14 @@ class Settings(BaseSettings):
         normalized = value.strip().lower()
         if normalized not in {"disabled", "smtp"}:
             raise ValueError("EMAIL_PROVIDER 必须为 disabled 或 smtp")
+        return normalized
+
+    @field_validator("ocr_provider")
+    @classmethod
+    def normalize_ocr_provider(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"disabled", "paddle_http"}:
+            raise ValueError("OCR_PROVIDER 必须为 disabled 或 paddle_http")
         return normalized
 
     @field_validator("cookie_samesite")
@@ -167,7 +181,16 @@ class Settings(BaseSettings):
             if not self.frontend_public_url.startswith("https://"):
                 errors.append("生产环境 FRONTEND_PUBLIC_URL 必须使用 HTTPS")
             if self.ocr_enabled:
-                errors.append("v0.3.0尚未交付真实OCR适配器，生产环境必须关闭 OCR_ENABLED")
+                if self.ocr_provider != "paddle_http":
+                    errors.append("启用OCR时必须配置 OCR_PROVIDER=paddle_http")
+                if not self.ocr_service_url or not self.ocr_service_url.startswith("https://"):
+                    errors.append("生产OCR服务必须配置HTTPS OCR_SERVICE_URL")
+                if not self.ocr_service_token:
+                    errors.append("生产OCR服务必须配置 OCR_SERVICE_TOKEN")
+                if not self.redis_url:
+                    errors.append("启用OCR时必须配置 Redis 队列")
+            elif self.ocr_provider != "disabled":
+                errors.append("OCR_ENABLED=false 时 OCR_PROVIDER 必须为 disabled")
             if self.ai_enabled:
                 errors.append("v0.3.0尚未交付真实AI报告适配器，生产环境必须关闭 AI_ENABLED")
 
