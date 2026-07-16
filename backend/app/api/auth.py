@@ -10,7 +10,15 @@ from app.db.session import get_db
 from app.dependencies import get_current_user
 from app.models import User
 from app.schemas import LoginRequest, RegisterParentRequest, UserRead
+from app.schemas_account import EmailVerificationRequest, PasswordResetConfirm, PasswordResetRequest
 from app.services.auth import login, register_parent, revoke_refresh_token, rotate_refresh_token
+from app.services.recovery import (
+    is_email_verified,
+    issue_email_verification,
+    request_password_reset,
+    reset_password,
+    verify_email,
+)
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -63,8 +71,15 @@ def register(
         family_name=payload.family_name,
         user_agent=request.headers.get("User-Agent"),
     )
+    verification = issue_email_verification(
+        db,
+        user=user,
+        requested_ip=request.client.host if request.client else None,
+    )
     _set_refresh_cookie(response, refresh)
-    return success(request, _token_payload(user, access, family_id))
+    data = _token_payload(user, access, family_id)
+    data["email_verification"] = verification
+    return success(request, data)
 
 
 @router.post("/login")
@@ -82,7 +97,9 @@ def login_user(
         user_agent=request.headers.get("User-Agent"),
     )
     _set_refresh_cookie(response, refresh)
-    return success(request, _token_payload(user, access, family_id))
+    data = _token_payload(user, access, family_id)
+    data["email_verified"] = is_email_verified(db, user.id)
+    return success(request, data)
 
 
 @router.post("/refresh")
@@ -106,5 +123,74 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
 
 
 @router.get("/me")
-def me(request: Request, user: User = Depends(get_current_user)) -> dict:
-    return success(request, UserRead.model_validate(user).model_dump())
+def me(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    data = UserRead.model_validate(user).model_dump()
+    data["email_verified"] = is_email_verified(db, user.id)
+    data["email_verification_required"] = settings.require_email_verification
+    return success(request, data)
+
+
+@router.get("/email-verification/status")
+def email_verification_status(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return success(
+        request,
+        {
+            "required": settings.require_email_verification,
+            "verified": is_email_verified(db, user.id),
+            "email": user.email,
+        },
+    )
+
+
+@router.post("/email-verification/request", status_code=status.HTTP_202_ACCEPTED)
+def request_verification(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    result = issue_email_verification(
+        db,
+        user=user,
+        requested_ip=request.client.host if request.client else None,
+    )
+    return success(request, result)
+
+
+@router.post("/email-verification/confirm")
+def confirm_verification(
+    payload: EmailVerificationRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = verify_email(db, payload.token)
+    return success(request, {"verified": True, "email": user.email})
+
+
+@router.post("/password-reset/request", status_code=status.HTTP_202_ACCEPTED)
+def request_reset(
+    payload: PasswordResetRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    result = request_password_reset(
+        db,
+        email=str(payload.email),
+        requested_ip=request.client.host if request.client else None,
+    )
+    return success(request, result)
+
+
+@router.post("/password-reset/confirm")
+def confirm_reset(
+    payload: PasswordResetConfirm,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> dict:
+    user = reset_password(db, raw_token=payload.token, new_password=payload.new_password)
+    _clear_refresh_cookie(response)
+    return success(request, {"reset": True, "email": user.email})
