@@ -13,6 +13,7 @@ from app.models import FamilyMember, Student, User
 from app.repositories.students import list_for_family
 from app.schemas import StudentAccountCreate, StudentCreate, StudentRead, UserRead
 from app.services.audit import add_audit_event
+from app.services.legal import require_active_child_consent
 
 router = APIRouter(prefix="/students", tags=["学生档案"])
 
@@ -47,6 +48,8 @@ def create_student(
     current_user: User = Depends(require_roles("parent", "admin")),
     db: Session = Depends(get_db),
 ) -> dict:
+    if current_user.role == "parent":
+        require_active_child_consent(db, current_user.id, family_id)
     student = Student(
         family_id=family_id,
         created_by_user_id=current_user.id,
@@ -78,6 +81,8 @@ def create_student_account(
     db: Session = Depends(get_db),
 ) -> dict:
     student = get_accessible_student(student_id, current_user, db)
+    if current_user.role == "parent":
+        require_active_child_consent(db, current_user.id, student.family_id)
     if student.user_id:
         raise ApiError(409, "STUDENT_002", "该学生档案已经绑定登录账号")
     normalized_email = str(payload.email).strip().lower()
