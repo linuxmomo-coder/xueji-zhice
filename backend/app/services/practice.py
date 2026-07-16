@@ -50,9 +50,9 @@ def create_session(
     practice_type: str,
     question_count: int,
 ) -> PracticeSession:
-    selected = candidates(db, subject, question_count)
+    selected = candidates(db, subject, student.current_grade, question_count)
     if not selected:
-        raise ApiError(404, "PRACTICE_002", "当前科目没有可用的已审核题目")
+        raise ApiError(404, "PRACTICE_002", "当前年级与科目没有可用的已审核题目")
     session = PracticeSession(
         family_id=student.family_id,
         student_id=student.id,
