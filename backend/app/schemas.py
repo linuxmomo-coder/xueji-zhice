@@ -38,17 +38,8 @@ class LoginRequest(BaseModel):
     role: Literal["parent", "student", "admin"]
 
 
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-
-class LogoutRequest(BaseModel):
-    refresh_token: str
-
-
 class TokenResponse(BaseModel):
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
     user: UserRead
     family_id: str | None
@@ -62,12 +53,6 @@ class StudentCreate(BaseModel):
     current_term: str = Field(default="第一学期", max_length=60)
     region: str | None = Field(default=None, max_length=80)
     daily_minutes_limit: int = Field(default=50, ge=5, le=240)
-
-
-class StudentAccountCreate(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
-    display_name: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class StudentRead(ORMModel):
@@ -85,6 +70,25 @@ class StudentRead(ORMModel):
     created_at: datetime
 
 
+class StudentAccountCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    display_name: str | None = Field(default=None, min_length=1, max_length=80)
+
+
+class StudentAccountRead(BaseModel):
+    student: StudentRead
+    user: UserRead
+
+
+class QuestionAssetRead(BaseModel):
+    id: str
+    role: str
+    option_key: str | None
+    alt_text: str | None
+    url: str
+
+
 class QuestionSummary(BaseModel):
     id: str
     question_code: str
@@ -95,13 +99,14 @@ class QuestionSummary(BaseModel):
     cognitive_level: str
     stem: dict[str, Any]
     options: list[dict[str, Any]]
+    assets: list[QuestionAssetRead] = []
     estimated_seconds: int
 
 
 class PracticeCreateRequest(BaseModel):
     student_id: str
-    subject: str = "数学"
-    practice_type: Literal["diagnostic", "daily", "targeted", "retest"] = "targeted"
+    subject: str
+    practice_type: Literal["diagnostic", "daily", "subject_drill", "targeted", "retest"] = "subject_drill"
     question_count: int = Field(default=3, ge=1, le=20)
 
 
@@ -151,6 +156,11 @@ class WrongQuestionRead(ORMModel):
     next_review_at: datetime | None
 
 
+class WrongQuestionDetail(BaseModel):
+    wrong_question: WrongQuestionRead
+    question: QuestionSummary
+
+
 class DocumentConfirmRequest(BaseModel):
     confirmed_data: dict[str, Any]
 
@@ -177,6 +187,8 @@ class DashboardResponse(BaseModel):
     metrics: list[dict[str, Any]]
     actions: list[dict[str, Any]]
     notices: list[dict[str, Any]]
+    generated_at: datetime
+    environment: str
 
 
 class ApiData(BaseModel):
