@@ -14,6 +14,7 @@ from app.repositories.questions import get_published_version
 from app.schemas import AnswerSubmitRequest, PracticeCreateRequest, PracticeRead, WrongQuestionDetail, WrongQuestionRead
 from app.services.legal import require_family_child_consent
 from app.services.practice import create_retest_session, create_session, get_next_item, submit_answer
+from app.services.recovery import require_verified_email
 
 router = APIRouter(tags=["练习与错题"])
 
@@ -42,6 +43,7 @@ def create_practice(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    require_verified_email(db, current_user)
     student = get_accessible_student(payload.student_id, current_user, db)
     require_family_child_consent(db, student.family_id)
     if payload.practice_type == "retest":
@@ -74,6 +76,7 @@ def next_question(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    require_verified_email(db, current_user)
     session = _session_for_user(db, session_id, current_user)
     require_family_child_consent(db, session.family_id)
     item = get_next_item(db, session)
@@ -115,6 +118,7 @@ def answer_question(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    require_verified_email(db, current_user)
     session = _session_for_user(db, session_id, current_user)
     require_family_child_consent(db, session.family_id)
     item = db.get(PracticeItem, payload.practice_item_id)
@@ -185,6 +189,7 @@ def retest_wrong_question(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    require_verified_email(db, current_user)
     student = get_accessible_student(student_id, current_user, db)
     require_family_child_consent(db, student.family_id)
     wrong = db.get(WrongQuestion, wrong_question_id)
