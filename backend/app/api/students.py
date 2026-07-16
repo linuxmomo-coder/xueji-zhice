@@ -14,6 +14,7 @@ from app.repositories.students import list_for_family
 from app.schemas import StudentAccountCreate, StudentCreate, StudentRead, UserRead
 from app.services.audit import add_audit_event
 from app.services.legal import require_active_child_consent
+from app.services.recovery import require_verified_email
 
 router = APIRouter(prefix="/students", tags=["学生档案"])
 
@@ -48,6 +49,7 @@ def create_student(
     current_user: User = Depends(require_roles("parent", "admin")),
     db: Session = Depends(get_db),
 ) -> dict:
+    require_verified_email(db, current_user)
     if current_user.role == "parent":
         require_active_child_consent(db, current_user.id, family_id)
     student = Student(
@@ -80,6 +82,7 @@ def create_student_account(
     current_user: User = Depends(require_roles("parent", "admin")),
     db: Session = Depends(get_db),
 ) -> dict:
+    require_verified_email(db, current_user)
     student = get_accessible_student(student_id, current_user, db)
     if current_user.role == "parent":
         require_active_child_consent(db, current_user.id, student.family_id)
