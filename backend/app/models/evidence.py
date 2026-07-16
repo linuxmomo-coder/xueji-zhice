@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -35,13 +35,23 @@ class AIReport(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
     family_id: Mapped[str] = mapped_column(ForeignKey("families.id", ondelete="CASCADE"), index=True)
     student_id: Mapped[str] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), index=True)
-    report_type: Mapped[str] = mapped_column(String(40))
-    status: Mapped[str] = mapped_column(String(40), default="completed", index=True)
-    provider: Mapped[str] = mapped_column(String(40), default="rules")
-    model: Mapped[str] = mapped_column(String(80), default="rules-v1")
+    requested_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    report_type: Mapped[str] = mapped_column(String(40), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="queued", index=True)
+    provider: Mapped[str] = mapped_column(String(40), default="pending")
+    model: Mapped[str] = mapped_column(String(120), default="pending")
+    prompt_version: Mapped[str] = mapped_column(String(40), default="learning-report-v1")
+    generation_key: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    evidence_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     output_json: Mapped[dict] = mapped_column(JSON, default=dict)
     evidence_ids: Mapped[list] = mapped_column(JSON, default=list)
+    usage_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AuditEvent(Base):
