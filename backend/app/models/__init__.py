@@ -1,6 +1,7 @@
 from app.models.base import TimestampMixin, utc_now, uuid_str
 from app.models.evidence import AIReport, AuditEvent, LearningDocument
 from app.models.identity import Family, FamilyMember, RefreshSession, Student, User
+from app.models.legal import GuardianConsent
 from app.models.practice import Attempt, PracticeItem, PracticeSession, WrongQuestion
 from app.models.question_bank import (
     Question,
@@ -13,8 +14,9 @@ from app.models.question_bank import (
 )
 
 __all__ = [
-    "AIReport", "Attempt", "AuditEvent", "Family", "FamilyMember", "LearningDocument",
-    "PracticeItem", "PracticeSession", "Question", "QuestionAnswerRule", "QuestionAsset",
-    "QuestionOption", "QuestionResponseField", "QuestionVersion", "QuestionVersionAsset",
-    "RefreshSession", "Student", "TimestampMixin", "User", "WrongQuestion", "utc_now", "uuid_str",
+    "AIReport", "Attempt", "AuditEvent", "Family", "FamilyMember", "GuardianConsent",
+    "LearningDocument", "PracticeItem", "PracticeSession", "Question", "QuestionAnswerRule",
+    "QuestionAsset", "QuestionOption", "QuestionResponseField", "QuestionVersion",
+    "QuestionVersionAsset", "RefreshSession", "Student", "TimestampMixin", "User",
+    "WrongQuestion", "utc_now", "uuid_str",
 ]
