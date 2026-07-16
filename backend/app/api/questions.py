@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -15,6 +17,15 @@ from app.services.storage import storage
 router = APIRouter(prefix="/questions", tags=["题库"])
 
 
+def _content_with_asset_urls(content: dict, asset_urls: dict[str, str]) -> dict:
+    result = deepcopy(content or {})
+    for block in result.get("blocks", []):
+        asset_ref = block.get("asset_ref")
+        if asset_ref and asset_ref in asset_urls:
+            block["asset_url"] = asset_urls[asset_ref]
+    return result
+
+
 def question_payload(question: Question, version: QuestionVersion, db: Session) -> dict:
     asset_rows = db.execute(
         select(QuestionVersionAsset, QuestionAsset)
@@ -22,16 +33,20 @@ def question_payload(question: Question, version: QuestionVersion, db: Session) 
         .where(QuestionVersionAsset.question_version_id == version.id, QuestionAsset.status == "active")
         .order_by(QuestionVersionAsset.sort_order)
     ).all()
-    assets = [
-        {
-            "id": asset.id,
-            "role": link.asset_role,
-            "option_key": link.option_key,
-            "alt_text": asset.alt_text,
-            "url": f"/questions/assets/{asset.id}",
-        }
-        for link, asset in asset_rows
-    ]
+    asset_urls: dict[str, str] = {}
+    assets: list[dict] = []
+    for link, asset in asset_rows:
+        url = storage.temporary_url(asset.object_key) or f"/questions/assets/{asset.id}"
+        asset_urls[asset.id] = url
+        assets.append(
+            {
+                "id": asset.id,
+                "role": link.asset_role,
+                "option_key": link.option_key,
+                "alt_text": asset.alt_text,
+                "url": url,
+            }
+        )
     return {
         "id": question.id,
         "question_code": question.question_code,
@@ -40,9 +55,13 @@ def question_payload(question: Question, version: QuestionVersion, db: Session) 
         "display_type": version.display_type,
         "difficulty": version.difficulty,
         "cognitive_level": version.cognitive_level,
-        "stem": version.stem_content,
+        "stem": _content_with_asset_urls(version.stem_content, asset_urls),
         "options": [
-            {"key": option.option_key, "content": option.content, "sort_order": option.sort_order}
+            {
+                "key": option.option_key,
+                "content": _content_with_asset_urls(option.content, asset_urls),
+                "sort_order": option.sort_order,
+            }
             for option in sorted(version.options, key=lambda item: item.sort_order)
         ],
         "assets": assets,
