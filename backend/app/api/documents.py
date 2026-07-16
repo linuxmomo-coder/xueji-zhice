@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -19,8 +20,20 @@ from app.services.audit import add_audit_event
 from app.services.storage import storage
 
 router = APIRouter(prefix="/documents", tags=["学习资料"])
-ALLOWED_MIME = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "application/pdf": ".pdf"}
-ALLOWED_DOCUMENT_TYPES = {"score", "comment", "evaluation", "textbook_cover", "textbook_catalog", "progress"}
+ALLOWED_MIME = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "application/pdf": ".pdf",
+}
+ALLOWED_DOCUMENT_TYPES = {
+    "score",
+    "comment",
+    "evaluation",
+    "textbook_cover",
+    "textbook_catalog",
+    "progress",
+}
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
@@ -50,7 +63,11 @@ async def upload_document(
         )
     )
     if existing:
-        return success(request, DocumentRead.model_validate(existing).model_dump(), duplicate=True)
+        return success(
+            request,
+            DocumentRead.model_validate(existing).model_dump(),
+            duplicate=True,
+        )
 
     relative = Path(student.family_id) / student.id / f"{digest}{ALLOWED_MIME[mime_type]}"
     stored = storage.save(str(relative).replace("\\", "/"), content)
@@ -65,7 +82,10 @@ async def upload_document(
         file_sha256=digest,
         mime_type=mime_type,
         status="awaiting_confirmation",
-        structured_data={"mode": "manual_fallback", "notice": "OCR适配器尚未启用，请家长确认后录入"},
+        structured_data={
+            "mode": "manual_fallback",
+            "notice": "OCR适配器尚未启用，请家长确认后录入",
+        },
     )
     db.add(document)
     try:
@@ -85,7 +105,43 @@ async def upload_document(
     )
     db.commit()
     db.refresh(document)
-    return success(request, DocumentRead.model_validate(document).model_dump(), duplicate=False)
+    return success(
+        request,
+        DocumentRead.model_validate(document).model_dump(),
+        duplicate=False,
+    )
+
+
+@router.get("")
+def list_documents(
+    request: Request,
+    student_id: str = Query(...),
+    status_filter: str | None = Query(default=None, alias="status"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    student = get_accessible_student(student_id, current_user, db)
+    conditions = [LearningDocument.student_id == student.id]
+    if status_filter:
+        conditions.append(LearningDocument.status == status_filter)
+    rows = list(
+        db.scalars(
+            select(LearningDocument)
+            .where(*conditions)
+            .order_by(LearningDocument.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).all()
+    )
+    return success(
+        request,
+        [DocumentRead.model_validate(item).model_dump() for item in rows],
+        page=page,
+        page_size=page_size,
+        total=len(rows),
+    )
 
 
 @router.get("/{document_id}")
@@ -117,8 +173,6 @@ def confirm_document(
     if document.status != "awaiting_confirmation":
         raise ApiError(409, "DOC_002", "当前资料状态不允许确认")
     before = {"status": document.status, "confirmed_data": document.confirmed_data}
-    from datetime import datetime, timezone
-
     document.confirmed_data = payload.confirmed_data
     document.status = "confirmed"
     document.confirmed_by_user_id = current_user.id
