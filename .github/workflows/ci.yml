@@ -9,12 +9,26 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: xueji_ci
+          POSTGRES_USER: xueji
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U xueji -d xueji_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: backend
     env:
       APP_ENV: test
-      DATABASE_URL: sqlite:///./ci.db
+      DATABASE_URL: postgresql+psycopg://xueji:ci-postgres-password@localhost:5432/xueji_ci
       SECRET_KEY: ci-secret-key-that-is-long-enough-for-tests
       ENABLE_DEMO: "false"
       AUTO_CREATE_SCHEMA: "false"
@@ -31,7 +45,7 @@ jobs:
       - run: ruff check app tests migrations
       - run: bandit -q -r app -x tests -s B105,B106
       - run: alembic upgrade head
-      - run: alembic downgrade base
+      - run: alembic current
       - run: pytest --cov=app --cov-report=term-missing --cov-fail-under=60
 
   frontend:
@@ -44,7 +58,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: npm install
+          registry-url: "https://registry.npmjs.org"
+      - run: npm config set registry https://registry.npmjs.org/
+      - run: npm install --no-audit --no-fund --ignore-scripts
       - run: npm run build
 
   docker:
