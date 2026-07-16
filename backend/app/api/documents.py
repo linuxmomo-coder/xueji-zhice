@@ -17,6 +17,7 @@ from app.dependencies import get_accessible_student, get_current_user, require_r
 from app.models import LearningDocument, User
 from app.schemas import DocumentConfirmRequest, DocumentRead
 from app.services.audit import add_audit_event
+from app.services.legal import require_family_child_consent
 from app.services.storage import storage
 
 router = APIRouter(prefix="/documents", tags=["学习资料"])
@@ -55,6 +56,7 @@ async def upload_document(
     db: Session = Depends(get_db),
 ) -> dict:
     student = get_accessible_student(student_id, current_user, db)
+    require_family_child_consent(db, student.family_id)
     if document_type not in ALLOWED_DOCUMENT_TYPES:
         raise ApiError(422, "DOC_001", "不支持的资料类型")
     mime_type = file.content_type or ""
@@ -163,6 +165,7 @@ def confirm_document(
     if not document:
         raise ApiError(404, "DOC_006", "资料不存在")
     student = get_accessible_student(document.student_id, current_user, db)
+    require_family_child_consent(db, student.family_id)
     if document.status != "awaiting_confirmation":
         raise ApiError(409, "DOC_002", "当前资料状态不允许确认")
     if not payload.confirmed_data:
