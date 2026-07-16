@@ -33,7 +33,7 @@ def change_password(
             )
             .values(revoked_at=now)
         )
-    db.commit()
+    db.flush()
 
 
 def list_sessions(db: Session, user_id: str) -> list[RefreshSession]:
@@ -52,8 +52,7 @@ def revoke_session(db: Session, *, user_id: str, session_id: str) -> RefreshSess
         raise ApiError(404, "ACCOUNT_003", "登录会话不存在")
     if session.revoked_at is None:
         session.revoked_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(session)
+        db.flush()
     return session
 
 
@@ -66,7 +65,7 @@ def revoke_all_sessions(db: Session, user_id: str) -> None:
         )
         .values(revoked_at=datetime.now(timezone.utc))
     )
-    db.commit()
+    db.flush()
 
 
 def deactivate_account(db: Session, *, user: User, password: str, confirmation: str) -> None:
@@ -90,4 +89,4 @@ def deactivate_account(db: Session, *, user: User, password: str, confirmation: 
         .where(RefreshSession.user_id == user.id, RefreshSession.revoked_at.is_(None))
         .values(revoked_at=now)
     )
-    db.commit()
+    db.flush()
