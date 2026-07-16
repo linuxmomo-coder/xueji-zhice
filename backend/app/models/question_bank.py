@@ -20,6 +20,7 @@ class Question(Base, TimestampMixin):
     current_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     source_type: Mapped[str] = mapped_column(String(30), default="self_built")
     copyright_status: Mapped[str] = mapped_column(String(30), default="owned")
+    source_id: Mapped[str | None] = mapped_column(ForeignKey("question_sources.id"), nullable=True, index=True)
     created_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     first_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     suspended_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
