@@ -64,6 +64,12 @@ class StudentCreate(BaseModel):
     daily_minutes_limit: int = Field(default=50, ge=5, le=240)
 
 
+class StudentAccountCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    display_name: str | None = Field(default=None, min_length=1, max_length=80)
+
+
 class StudentRead(ORMModel):
     id: str
     family_id: str
