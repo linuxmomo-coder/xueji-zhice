@@ -24,7 +24,22 @@ jobs:
       - run: pip install -q -r requirements-dev.txt
       - run: ruff check app tests migrations
       - run: bandit -q -r app -x tests -s B105,B106
-      - run: pytest -q --tb=short --cov=app --cov-report=term-missing --cov-fail-under=65
+      - name: Run backend tests
+        shell: bash
+        run: |
+          set +e
+          pytest -q --tb=short --cov=app --cov-report=term-missing --cov-fail-under=65 > pytest.log 2>&1
+          code=$?
+          cat pytest.log
+          exit $code
+      - name: Upload pytest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-log
+          path: backend/pytest.log
+          if-no-files-found: error
+          retention-days: 7
 
   backend-migrations:
     runs-on: ubuntu-latest
