@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     account,
+    ai_reports,
     auth,
     dashboard,
     demo,
@@ -38,7 +39,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="学迹智评 v0.3.0：生产安全基线、账号授权、题库导入审核与可审计学习闭环。",
+    description="学迹智评 v0.3.0：账号授权、题库审核、OCR与证据化AI学习报告闭环。",
     docs_url="/docs" if settings.enable_api_docs else None,
     redoc_url=None,
     openapi_url="/openapi.json" if settings.enable_api_docs else None,
@@ -75,6 +76,7 @@ for router in [
     question_admin.router,
     practice.router,
     documents.router,
+    ai_reports.router,
 ]:
     app.include_router(router, prefix=settings.api_prefix)
 if settings.enable_demo and not settings.is_production:
