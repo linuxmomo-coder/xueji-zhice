@@ -10,6 +10,54 @@ def login(client, email: str, password: str, role: str) -> dict:
     return response.json()["data"]
 
 
+def accept_guardian_consent(client, access_token: str) -> dict:
+    policy = client.get("/api/v1/legal/current")
+    assert policy.status_code == 200, policy.text
+    current = policy.json()["data"]
+    response = client.post(
+        "/api/v1/legal/consents",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={
+            "terms_version": current["terms_version"],
+            "privacy_version": current["privacy_version"],
+            "child_policy_version": current["child_policy_version"],
+            "consent_scope": current["required_scope"],
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["data"]
+
+
+def test_student_creation_requires_explicit_guardian_consent(client) -> None:
+    registered = client.post(
+        "/api/v1/auth/register/parent",
+        json={
+            "email": "consent-parent@example.com",
+            "password": "StrongPass123!",
+            "display_name": "授权家长",
+            "family_name": "授权家庭",
+        },
+    ).json()["data"]
+    headers = {"Authorization": f"Bearer {registered['access_token']}"}
+
+    blocked = client.post(
+        "/api/v1/students",
+        headers=headers,
+        json={"nickname": "未授权学生", "current_grade": 8},
+    )
+    assert blocked.status_code == 403
+    assert blocked.json()["error"]["code"] == "LEGAL_005"
+
+    consent = accept_guardian_consent(client, registered["access_token"])
+    assert consent["revoked_at"] is None
+    created = client.post(
+        "/api/v1/students",
+        headers=headers,
+        json={"nickname": "已授权学生", "current_grade": 8},
+    )
+    assert created.status_code == 201, created.text
+
+
 def test_register_parent_create_student_and_student_account(client) -> None:
     response = client.post(
         "/api/v1/auth/register/parent",
@@ -24,6 +72,7 @@ def test_register_parent_create_student_and_student_account(client) -> None:
     assert "refresh_token" not in response.json()["data"]
     assert response.cookies.get("xueji_refresh")
     token = response.json()["data"]["access_token"]
+    accept_guardian_consent(client, token)
     headers = {"Authorization": f"Bearer {token}"}
     create = client.post(
         "/api/v1/students",
@@ -68,6 +117,36 @@ def test_refresh_cookie_rotation_and_logout(client) -> None:
     assert logout.status_code == 204
 
 
+def test_password_change_and_session_management(client) -> None:
+    auth = login(client, "student@example.com", "Student123!", "student")
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+    sessions = client.get("/api/v1/account/sessions", headers=headers)
+    assert sessions.status_code == 200, sessions.text
+    assert sessions.json()["meta"]["total"] >= 1
+
+    changed = client.post(
+        "/api/v1/account/password",
+        headers=headers,
+        json={
+            "current_password": "Student123!",
+            "new_password": "StudentPassword456!",
+            "revoke_other_sessions": True,
+        },
+    )
+    assert changed.status_code == 204, changed.text
+
+    old_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "student@example.com", "password": "Student123!", "role": "student"},
+    )
+    assert old_login.status_code == 401
+    new_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "student@example.com", "password": "StudentPassword456!", "role": "student"},
+    )
+    assert new_login.status_code == 200, new_login.text
+
+
 def test_cross_family_access_is_forbidden(client) -> None:
     first = client.post(
         "/api/v1/auth/register/parent",
@@ -77,6 +156,7 @@ def test_cross_family_access_is_forbidden(client) -> None:
         "/api/v1/auth/register/parent",
         json={"email": "b@example.com", "password": "StrongPass123!", "display_name": "B", "family_name": "B家"},
     ).json()["data"]
+    accept_guardian_consent(client, first["access_token"])
     student = client.post(
         "/api/v1/students",
         headers={"Authorization": f"Bearer {first['access_token']}"},
@@ -119,6 +199,7 @@ def test_dashboard_uses_database_counts(client) -> None:
     assert empty_metrics["已完成练习"] == 0
     assert empty_dashboard.json()["data"]["environment"] == "test"
 
+    accept_guardian_consent(client, registered["access_token"])
     client.post("/api/v1/students", headers=headers, json={"nickname": "真实学生", "current_grade": 8})
     updated_dashboard = client.get("/api/v1/dashboard", headers=headers)
     updated_metrics = {item["label"]: item["value"] for item in updated_dashboard.json()["data"]["metrics"]}
