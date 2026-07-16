@@ -14,25 +14,66 @@ export type AuthData = {
   family_id: string | null;
 };
 
-type ApiEnvelope<T> = { data: T; meta: Record<string, unknown> };
+export type ApiEnvelope<T> = { data: T; meta: Record<string, unknown> };
 type ApiErrorEnvelope = { error?: { code?: string; message?: string; request_id?: string } };
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api/v1";
+const STORAGE_KEY = "xueji-auth";
+let refreshPromise: Promise<AuthData | null> | null = null;
 
 export function getStoredAuth(): AuthData | null {
-  const value = localStorage.getItem("xueji-auth");
+  const value = sessionStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(STORAGE_KEY);
   if (!value) return null;
   try {
-    return JSON.parse(value) as AuthData;
+    const auth = JSON.parse(value) as AuthData;
+    if (localStorage.getItem(STORAGE_KEY)) {
+      localStorage.removeItem(STORAGE_KEY);
+      sessionStorage.setItem(STORAGE_KEY, value);
+    }
+    return auth;
   } catch {
-    localStorage.removeItem("xueji-auth");
+    sessionStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_KEY);
     return null;
   }
 }
 
 export function storeAuth(auth: AuthData | null): void {
-  if (auth) localStorage.setItem("xueji-auth", JSON.stringify(auth));
-  else localStorage.removeItem("xueji-auth");
+  localStorage.removeItem(STORAGE_KEY);
+  if (auth) sessionStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
+  else sessionStorage.removeItem(STORAGE_KEY);
+}
+
+async function refreshAuth(auth: AuthData): Promise<AuthData | null> {
+  if (!refreshPromise) {
+    refreshPromise = fetch(`${API_BASE}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: auth.refresh_token })
+    })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const payload = (await response.json()) as ApiEnvelope<AuthData>;
+        storeAuth(payload.data);
+        return payload.data;
+      })
+      .catch(() => null)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
+async function request<T>(
+  path: string,
+  options: RequestInit,
+  auth: AuthData | null
+): Promise<Response> {
+  const headers = new Headers(options.headers);
+  if (!(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
+  if (auth?.access_token) headers.set("Authorization", `Bearer ${auth.access_token}`);
+  return fetch(`${API_BASE}${path}`, { ...options, headers });
 }
 
 export async function api<T>(
@@ -40,10 +81,16 @@ export async function api<T>(
   options: RequestInit = {},
   auth: AuthData | null = getStoredAuth()
 ): Promise<ApiEnvelope<T>> {
-  const headers = new Headers(options.headers);
-  if (!(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
-  if (auth?.access_token) headers.set("Authorization", `Bearer ${auth.access_token}`);
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  let activeAuth = auth;
+  let response = await request<T>(path, options, activeAuth);
+
+  const canRefresh = response.status === 401 && activeAuth?.refresh_token && path !== "/auth/refresh";
+  if (canRefresh) {
+    activeAuth = await refreshAuth(activeAuth);
+    if (activeAuth) response = await request<T>(path, options, activeAuth);
+    else storeAuth(null);
+  }
+
   if (!response.ok) {
     let payload: ApiErrorEnvelope = {};
     try {
@@ -51,6 +98,7 @@ export async function api<T>(
     } catch {
       // Keep a user-safe fallback below.
     }
+    if (response.status === 401) storeAuth(null);
     const message = payload.error?.message ?? `请求失败（${response.status}）`;
     const requestId = payload.error?.request_id ? `，请求号 ${payload.error.request_id}` : "";
     throw new Error(`${message}${requestId}`);
