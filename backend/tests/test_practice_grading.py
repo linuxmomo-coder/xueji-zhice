@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.db.session import SessionLocal
+from app.models import Student
+
 
 def _login(
     client,
@@ -38,6 +41,29 @@ def test_practice_creates_snapshot_and_wrong_record(client) -> None:
     wrong = client.get(f"/api/v1/students/{student_id}/wrong-questions", headers=headers)
     assert wrong.status_code == 200
     assert len(wrong.json()["data"]) == 1
+
+
+def test_practice_never_uses_questions_from_another_grade(client) -> None:
+    auth = _login(client)
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+    student_id = client.get("/api/v1/students", headers=headers).json()["data"][0]["id"]
+    with SessionLocal() as db:
+        student = db.get(Student, student_id)
+        assert student is not None
+        student.current_grade = 7
+        db.commit()
+
+    available = client.get("/api/v1/questions/subjects?grade=7", headers=headers)
+    assert available.status_code == 200
+    assert available.json()["data"] == []
+
+    created = client.post(
+        "/api/v1/practice-sessions",
+        headers=headers,
+        json={"student_id": student_id, "subject": "数学", "question_count": 1},
+    )
+    assert created.status_code == 404
+    assert created.json()["error"]["code"] == "PRACTICE_002"
 
 
 def test_symbolic_equivalence_accepts_root_forms(client) -> None:
