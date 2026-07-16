@@ -31,6 +31,50 @@ def test_register_parent_and_create_student(client) -> None:
     assert create.json()["data"]["family_id"] == response.json()["data"]["family_id"]
 
 
+def test_parent_can_create_and_bind_student_login(client) -> None:
+    parent = client.post(
+        "/api/v1/auth/register/parent",
+        json={
+            "email": "guardian@example.com",
+            "password": "StrongPass123!",
+            "display_name": "监护人",
+            "family_name": "监护家庭",
+        },
+    ).json()["data"]
+    headers = {"Authorization": f"Bearer {parent['access_token']}"}
+    student = client.post(
+        "/api/v1/students",
+        headers=headers,
+        json={"nickname": "小同学", "current_grade": 8},
+    ).json()["data"]
+    account = client.post(
+        f"/api/v1/students/{student['id']}/account",
+        headers=headers,
+        json={
+            "email": "bound-student@example.com",
+            "password": "StudentPass123!",
+            "display_name": "小同学",
+        },
+    )
+    assert account.status_code == 201, account.text
+    assert account.json()["data"]["student"]["user_id"]
+    assert account.json()["data"]["user"]["role"] == "student"
+
+    student_login = login(
+        client,
+        "bound-student@example.com",
+        "StudentPass123!",
+        "student",
+    )
+    assert student_login["user"]["role"] == "student"
+    own_students = client.get(
+        "/api/v1/students",
+        headers={"Authorization": f"Bearer {student_login['access_token']}"},
+    )
+    assert own_students.status_code == 200
+    assert [item["id"] for item in own_students.json()["data"]] == [student["id"]]
+
+
 def test_cross_family_access_is_forbidden(client) -> None:
     first = client.post(
         "/api/v1/auth/register/parent",
