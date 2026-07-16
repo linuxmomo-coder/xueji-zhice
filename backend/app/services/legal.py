@@ -28,6 +28,21 @@ def current_policy_payload() -> dict:
     }
 
 
+def _validate_active_consent(consent: GuardianConsent | None) -> GuardianConsent:
+    if not consent:
+        raise ApiError(403, "LEGAL_005", "请先由监护人完成儿童个人信息处理授权")
+    if (
+        consent.terms_version != CURRENT_TERMS_VERSION
+        or consent.privacy_version != CURRENT_PRIVACY_VERSION
+        or consent.child_policy_version != CURRENT_CHILD_POLICY_VERSION
+    ):
+        raise ApiError(409, "LEGAL_006", "授权规则已更新，请监护人重新确认")
+    missing = [key for key, required in REQUIRED_CHILD_SCOPE.items() if required and not consent.consent_scope.get(key)]
+    if missing:
+        raise ApiError(403, "LEGAL_005", "当前授权范围不足")
+    return consent
+
+
 def record_guardian_consent(
     db: Session,
     *,
@@ -95,20 +110,24 @@ def get_active_family_consent(db: Session, guardian_user_id: str, family_id: str
     )
 
 
+def get_any_active_family_consent(db: Session, family_id: str) -> GuardianConsent | None:
+    return db.scalar(
+        select(GuardianConsent)
+        .where(
+            GuardianConsent.family_id == family_id,
+            GuardianConsent.student_id.is_(None),
+            GuardianConsent.revoked_at.is_(None),
+        )
+        .order_by(GuardianConsent.accepted_at.desc())
+    )
+
+
 def require_active_child_consent(db: Session, guardian_user_id: str, family_id: str) -> GuardianConsent:
-    consent = get_active_family_consent(db, guardian_user_id, family_id)
-    if not consent:
-        raise ApiError(403, "LEGAL_005", "请先由监护人完成儿童个人信息处理授权")
-    if (
-        consent.terms_version != CURRENT_TERMS_VERSION
-        or consent.privacy_version != CURRENT_PRIVACY_VERSION
-        or consent.child_policy_version != CURRENT_CHILD_POLICY_VERSION
-    ):
-        raise ApiError(409, "LEGAL_006", "授权规则已更新，请监护人重新确认")
-    missing = [key for key, required in REQUIRED_CHILD_SCOPE.items() if required and not consent.consent_scope.get(key)]
-    if missing:
-        raise ApiError(403, "LEGAL_005", "当前授权范围不足")
-    return consent
+    return _validate_active_consent(get_active_family_consent(db, guardian_user_id, family_id))
+
+
+def require_family_child_consent(db: Session, family_id: str) -> GuardianConsent:
+    return _validate_active_consent(get_any_active_family_consent(db, family_id))
 
 
 def revoke_consent(db: Session, consent: GuardianConsent) -> GuardianConsent:
