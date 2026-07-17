@@ -143,6 +143,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate deployment scripts
+        run: sh -n deployment/preflight.sh deployment/deploy.sh deployment/restore-postgres.sh deployment/smoke-test.sh
       - run: cp .env.example .env
       - run: docker compose --env-file .env -f deployment/docker-compose.yml config
       - run: docker build -t xueji-zhice-backend ./backend
