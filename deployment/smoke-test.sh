@@ -17,15 +17,15 @@ request_code() {
   curl -sS -o /tmp/xueji-smoke-body -w "%{http_code}" --max-time 20 "$BASE_URL$path"
 }
 
-health_code=$(request_code /health)
+health_code=$(request_code /health/ready)
 [ "$health_code" = "200" ] || {
-  echo "健康检查失败: HTTP $health_code" >&2
+  echo "依赖就绪检查失败: HTTP $health_code" >&2
   cat /tmp/xueji-smoke-body >&2 || true
   exit 1
 }
 
-grep -q '"status":"ok"' /tmp/xueji-smoke-body || {
-  echo "健康检查响应格式异常" >&2
+grep -q '"dependencies":"ready"' /tmp/xueji-smoke-body || {
+  echo "依赖就绪响应格式异常" >&2
   cat /tmp/xueji-smoke-body >&2
   exit 1
 }
@@ -47,4 +47,4 @@ unauthorized_code=$(request_code /api/v1/students)
   exit 1
 }
 
-echo "[smoke] OK: HTTPS健康检查、生产接口关闭和未认证访问控制均通过"
+echo "[smoke] OK: HTTPS、数据库/Redis就绪、生产接口关闭和未认证访问控制均通过"
