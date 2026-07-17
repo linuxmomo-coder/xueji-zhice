@@ -2,21 +2,25 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-xueji_zhice}
-      POSTGRES_USER: ${POSTGRES_USER:-xueji}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-xueji} -d ${POSTGRES_DB:-xueji_zhice}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 20
     restart: unless-stopped
+    mem_limit: 1g
+    logging:
+      options: {max-size: "10m", max-file: "5"}
+    networks: [internal]
 
   redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
     volumes:
       - redis_data:/data
     healthcheck:
@@ -25,6 +29,10 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+    mem_limit: 256m
+    logging:
+      options: {max-size: "10m", max-file: "5"}
+    networks: [internal]
 
   backend:
     build:
@@ -32,7 +40,7 @@ services:
     env_file:
       - ../.env
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-xueji}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-xueji_zhice}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       FILE_STORAGE_PATH: /data/uploads
     volumes:
@@ -46,13 +54,67 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 12
     restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.5
+    logging:
+      options: {max-size: "20m", max-file: "5"}
+    networks: [internal]
+
+  ocr-worker:
+    build:
+      context: ../backend
+    command: ["python", "-m", "app.worker"]
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      FILE_STORAGE_PATH: /data/uploads
+    volumes:
+      - upload_data:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      options: {max-size: "20m", max-file: "5"}
+    networks: [internal]
+
+  ai-worker:
+    build:
+      context: ../backend
+    command: ["python", "-m", "app.ai_worker"]
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      options: {max-size: "20m", max-file: "5"}
+    networks: [internal]
 
   frontend:
     build:
       context: ../frontend
     restart: unless-stopped
+    mem_limit: 128m
+    logging:
+      options: {max-size: "10m", max-file: "3"}
+    networks: [internal]
 
   nginx:
     image: nginx:1.27-alpine
@@ -66,6 +128,14 @@ services:
       frontend:
         condition: service_started
     restart: unless-stopped
+    mem_limit: 128m
+    logging:
+      options: {max-size: "10m", max-file: "5"}
+    networks: [internal]
+
+networks:
+  internal:
+    driver: bridge
 
 volumes:
   postgres_data:

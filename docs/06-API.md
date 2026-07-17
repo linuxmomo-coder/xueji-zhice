@@ -1,352 +1,166 @@
-# 学迹智评 API 设计说明书
+# 学迹智评 API 设计说明书 v0.2.1
 
-## 1. 基本约定
+## 1. 协议
 
 - Base URL：`/api/v1`
-- JSON 使用 UTF-8。
-- 时间使用 ISO 8601 UTC。
-- 主键使用 UUID。
-- 列表接口使用 `page`、`page_size` 或游标分页。
-- 写操作支持 `Idempotency-Key`。
-- 认证使用 `Authorization: Bearer <access_token>`。
+- 认证：`Authorization: Bearer <access_token>`
+- 时间：ISO 8601 UTC
+- 分页：`page`、`page_size`，最大100
+- 请求追踪：响应头 `X-Request-ID`
 
-成功响应：
+成功：
 
 ```json
 {"data": {}, "meta": {"request_id": "..."}}
 ```
 
-失败响应：
+失败：
 
 ```json
-{
-  "error": {
-    "code": "AUTH_002",
-    "message": "权限不足",
-    "request_id": "...",
-    "details": {}
-  }
-}
+{"error":{"code":"FAMILY_001","message":"无权访问该学生数据","request_id":"...","details":{}}}
 ```
 
-## 2. 认证
+## 2. 当前可用接口（available）
 
-### POST `/auth/register/parent`
+### 认证
 
-创建家长账号。
+| 方法 | 路径 | 权限 | 说明 |
+|---|---|---|---|
+| POST | `/auth/register/parent` | public | 创建家长、家庭和主监护关系 |
+| POST | `/auth/login` | public | 提交邮箱、密码和角色；角色匹配后返回access/refresh |
+| POST | `/auth/refresh` | refresh | 轮换刷新令牌 |
+| POST | `/auth/logout` | refresh | 撤销会话 |
+| GET | `/auth/me` | login | 当前用户和家庭摘要 |
 
-### POST `/auth/login`
-
-请求：
+登录请求：
 
 ```json
-{"account": "parent@example.com", "password": "***"}
+{"email":"parent@example.com","password":"***","role":"parent"}
 ```
 
-响应 access_token、refresh_token 和用户摘要。
+`role`只允许`parent`、`student`、`admin`。所选角色与账号真实角色不一致时返回`AUTH_004`。登录页的角色选择只是声明登录意图，最终权限以数据库账号和服务器签发令牌为准。
 
-### POST `/auth/refresh`
+### 学生
 
-刷新访问令牌并轮换 refresh_token。
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/students?page=&page_size=` | 本人或家庭范围分页 |
+| POST | `/students` | 家长/管理员创建学生 |
+| GET | `/students/{student_id}` | 统一学生范围校验 |
 
-### POST `/auth/logout`
+### 题库
 
-撤销当前会话。
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/questions` | 读取已发布题目；支持科目/年级分页 |
+| GET | `/questions/subjects?grade=` | 返回该年级实际可用科目和已发布题量 |
 
-### GET `/auth/me`
+`/questions/subjects`仅统计：
 
-返回当前用户和角色。
+- `questions.lifecycle_status=active`；
+- `question_versions.review_status=approved`；
+- `question_versions.publication_status=published`；
+- `questions.current_version_id`指向该版本。
 
-## 3. 家庭与学生
+学生练习接口只返回题目快照，不返回标准答案。
 
-### GET `/families/current`
+### 练习
 
-返回当前家庭、监护人和学生列表。
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/practice-sessions` | 创建会话和题目快照 |
+| GET | `/practice-sessions/{id}` | 会话摘要 |
+| GET | `/practice-sessions/{id}/next` | 下一题 |
+| POST | `/practice-sessions/{id}/answers` | 提交、归一化、判分、错题更新 |
+| GET | `/students/{id}/wrong-questions` | 错题列表 |
 
-### POST `/students`
+前端创建练习前，应先读取学生年级及`/questions/subjects`结果。提交的题量不得超过界面显示的真实可用题量；后端仍需再次校验。
 
-家长创建学生档案。
+### 资料
 
-```json
-{
-  "nickname": "林小雨",
-  "birth_date": "2015-05-01",
-  "school_system": "6-3",
-  "current_grade": 5,
-  "daily_minutes_limit": 50
-}
-```
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/documents/upload` | 私有上传、MIME/大小/摘要/重复校验 |
+| GET | `/students/{id}/documents` | 家庭范围资料列表 |
+| POST | `/documents/{id}/confirm` | 仅家长/管理员确认，保存审计 |
 
-### GET `/students/{student_id}`
+### 工作台
 
-返回学生基础档案。
+`GET /dashboard`根据服务器确认的角色实时聚合数据库指标和可用行动，不接受role参数。
 
-### PATCH `/students/{student_id}`
-
-仅家长修改允许字段。
-
-### POST `/students/{student_id}/terms`
-
-创建或确认学期档案。
-
-### POST `/students/{student_id}/terms/{term_id}/archive`
-
-归档学期；需要主监护人确认。
-
-## 4. 教材与进度
-
-### GET `/subjects`
-
-返回科目主数据。
-
-### GET `/textbooks`
-
-过滤参数：subject、grade、publisher、revision_year、volume。
-
-### POST `/students/{student_id}/textbooks`
-
-```json
-{
-  "term_id": "...",
-  "subject_id": "...",
-  "textbook_id": "..."
-}
-```
-
-### PATCH `/students/{student_id}/textbooks/{assignment_id}/progress`
-
-```json
-{
-  "current_node_id": "...",
-  "source": "parent_confirmed"
-}
-```
-
-### GET `/textbooks/{textbook_id}/tree`
-
-返回教材目录与知识点树。
-
-## 5. 上传与 OCR
-
-### POST `/documents/upload`
-
-`multipart/form-data`：
-
-- file
-- student_id
-- document_type
-
-响应：
+响应示例：
 
 ```json
 {
   "data": {
-    "document_id": "...",
-    "status": "uploaded",
-    "duplicate_candidate": false
+    "role": "parent",
+    "identity": {
+      "user_id": "...",
+      "display_name": "家长",
+      "email": "...",
+      "role": "parent",
+      "family_id": "..."
+    },
+    "metrics": [
+      {"label": "家庭学生档案", "value": 1},
+      {"label": "已完成练习", "value": 0}
+    ],
+    "actions": [
+      {"title": "创建短练习", "route": "/practice", "enabled": false, "reason": "当前年级暂无已发布题目"}
+    ],
+    "notices": [
+      {"level": "insufficient_data", "text": "暂无已完成练习，当前不能形成学习趋势判断。"}
+    ],
+    "generated_at": "2026-07-15T02:00:00Z"
   }
 }
 ```
 
-### POST `/documents/{document_id}/ocr`
-
-创建异步 OCR 任务。
-
-### GET `/documents/{document_id}`
-
-返回文档状态、OCR 原文、结构化候选和低置信度字段。文件地址使用短期签名 URL。
-
-### POST `/documents/{document_id}/confirm`
-
-仅绑定学生家长可调用。
-
-```json
-{
-  "confirmed_data": {
-    "exam_name": "第六单元测验",
-    "scores": [{"subject": "数学", "score": 86, "full_score": 100}]
-  }
-}
-```
-
-### POST `/documents/{document_id}/reject`
-
-```json
-{"reason": "图片模糊，重新上传"}
-```
-
-## 6. 成绩与评语
-
-### GET `/students/{student_id}/scores`
-
-过滤 term_id、subject_id、date_from、date_to。
-
-### POST `/students/{student_id}/scores/manual`
-
-家长手工录入成绩。
-
-### GET `/students/{student_id}/comments`
-
-返回原文、标签、证据和确认状态。
-
-### PATCH `/comments/{comment_id}/labels`
-
-家长修正结构化标签，并保留修订历史。
-
-## 7. 本地题库
-
-### GET `/admin/questions`
-
-后台筛选题目。
-
-### POST `/admin/questions`
-
-创建题目草稿。
-
-### GET `/admin/questions/{question_id}`
-
-返回完整题目与映射。
-
-### PATCH `/admin/questions/{question_id}`
-
-修改并增加版本。
-
-### POST `/admin/questions/{question_id}/mappings`
-
-创建教材和知识点映射。
-
-### POST `/admin/questions/{question_id}/review`
-
-```json
-{"decision": "approve", "notes": "答案与解析已复核"}
-```
-
-### POST `/admin/questions/{question_id}/publish`
-
-发布前执行完整性、版权和审核校验。
-
-## 8. 练习与评测
-
-### POST `/students/{student_id}/practice-sessions`
-
-```json
-{
-  "practice_type": "targeted",
-  "subject_id": "...",
-  "knowledge_point_ids": ["..."],
-  "question_count": 6,
-  "estimated_minutes": 15
-}
-```
-
-### GET `/practice-sessions/{session_id}`
-
-返回会话状态和进度。
-
-### GET `/practice-sessions/{session_id}/next`
-
-返回下一题；不返回答案和完整解析。
-
-### POST `/practice-sessions/{session_id}/answers`
-
-```json
-{
-  "question_id": "...",
-  "answer": {"selected": ["B"]},
-  "duration_seconds": 72,
-  "hint_count": 0
-}
-```
-
-响应正确性、分层反馈和下一步；只有达到策略条件时返回解析。
-
-### POST `/practice-sessions/{session_id}/finish`
-
-结算并触发错题与掌握度更新。
-
-### GET `/students/{student_id}/wrong-questions`
-
-过滤状态、科目、知识点和下次复习时间。
-
-### POST `/wrong-questions/{wrong_id}/retest`
-
-创建原题、同类题或变式题复测。
-
-### GET `/students/{student_id}/mastery`
-
-返回知识点掌握度、证据量和复习建议。
-
-## 9. 学习任务
-
-### GET `/students/{student_id}/tasks`
-
-### POST `/students/{student_id}/tasks`
-
-家长推送任务。
-
-```json
-{
-  "task_type": "practice",
-  "title": "数学应用题专项",
-  "payload": {"knowledge_point_ids": ["..."]},
-  "estimated_minutes": 15,
-  "due_at": "2026-07-16T12:00:00Z",
-  "reward_points": 40
-}
-```
-
-### PATCH `/tasks/{task_id}/status`
-
-学生开始、暂停或完成任务。
-
-## 10. AI 报告
-
-### POST `/students/{student_id}/reports`
-
-```json
-{
-  "report_type": "parent_weekly",
-  "date_from": "2026-07-07",
-  "date_to": "2026-07-14"
-}
-```
-
-返回异步报告 ID。
-
-### GET `/reports/{report_id}`
-
-返回状态。完成后按角色返回允许查看的版本。
-
-### GET `/students/{student_id}/reports`
-
-返回报告历史、模型与模板版本，不返回模型密钥或内部提示词。
-
-## 11. 打印
-
-### POST `/print-jobs`
-
-类型：practice、answer、explanation、wrong_book、knowledge_cards、student_report、parent_report。
-
-### GET `/print-jobs/{job_id}`
-
-完成后返回短期下载 URL。
-
-## 12. 后台配置与监控
-
-### GET `/admin/system/health`
-
-返回数据库、Redis、OCR、主 AI 和备用 AI 状态；敏感细节脱敏。
-
-### GET `/admin/data-quality`
-
-返回 OCR 修改率、题目争议率、报告 Schema 通过率等。
-
-### GET/PUT `/admin/settings/{group}`
-
-配置报告模板版本、OCR 阈值、学习时长默认值等。真实 API Key 不通过普通查询接口返回。
-
-## 13. 幂等与并发
-
-- 文档确认、练习结算、积分发放和报告生成必须使用幂等键。
-- 修改题目和资料确认使用乐观锁版本号。
-- 同一练习题重复提交只接受第一次有效提交，除非业务明确允许重试。
+工作台统计口径：
+
+- completed练习会话；
+- 未mastered错题；
+- awaiting_confirmation资料；
+- active且approved/published题目；
+- 当前登录者有权访问的学生范围。
+
+数据为空时返回0或空数组，不返回演示数字。
+
+### Demo
+
+`/demo/*`只有在非生产环境且显式`ENABLE_DEMO=true`时存在；生产OpenAPI中不得出现。生产登录页不得显示演示账号和密码。
+
+## 3. 计划接口（planned）
+
+- 题库Excel导入、审核、发布和版本修订；
+- 教材目录、知识点和题型分类；
+- OCR异步任务状态；
+- 报告生成与历史；
+- 同类题/变式题复测；
+- 勘误、AI复核和历史重判；
+- 数据导出、删除和通知。
+
+## 4. 错误码
+
+| 错误码 | 含义 |
+|---|---|
+| AUTH_001 | 未认证或令牌无效 |
+| AUTH_002 | 角色权限不足 |
+| AUTH_003 | 邮箱已注册 |
+| AUTH_004 | 账号、密码或登录身份不匹配 |
+| FAMILY_001 | 跨家庭或非本人资源 |
+| DOC_001 | 文件类型/大小不支持 |
+| DOC_002 | 文档状态不允许操作 |
+| BANK_001 | 没有可发布/可练习题目 |
+| PRACTICE_001 | 会话或题目状态不允许 |
+| PRACTICE_002 | 重复提交 |
+| VALIDATION_001 | 请求参数错误 |
+| SYSTEM_001 | 服务内部错误 |
+
+## 5. 契约治理
+
+- OpenAPI是当前可用接口事实来源；
+- 文档不得把planned写成available；
+- 前端类型后续从OpenAPI生成；
+- 请求/响应破坏性变更必须增加API版本或兼容期；
+- 统计接口必须注明口径，不允许用前端常量替代后端业务数据。
