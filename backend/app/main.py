@@ -4,6 +4,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from redis import Redis
+from redis.exceptions import RedisError
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api import (
     account,
@@ -20,7 +24,7 @@ from app.api import (
     students,
 )
 from app.core.config import settings
-from app.core.errors import install_error_handlers
+from app.core.errors import ApiError, install_error_handlers
 from app.core.middleware import RequestContextMiddleware
 from app.db.session import Base, SessionLocal, engine
 from app.seed import seed_demo_data
@@ -57,14 +61,34 @@ app.add_middleware(
 install_error_handlers(app)
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
+def _health_payload() -> dict[str, str]:
     return {
         "status": "ok",
         "service": "xueji-zhice-api",
         "version": settings.app_version,
         "environment": settings.app_env,
     }
+
+
+@app.get("/health")
+@app.get("/health/live")
+def health() -> dict[str, str]:
+    return _health_payload()
+
+
+@app.get("/health/ready")
+def readiness() -> dict[str, str]:
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        Redis.from_url(
+            settings.redis_url,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        ).ping()
+    except (SQLAlchemyError, RedisError, OSError) as exc:
+        raise ApiError(503, "HEALTH_001", "数据库或任务队列尚未就绪") from exc
+    return {**_health_payload(), "dependencies": "ready"}
 
 
 for router in [
