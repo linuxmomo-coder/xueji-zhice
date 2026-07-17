@@ -32,15 +32,15 @@ $COMPOSE run --rm backend alembic upgrade head
 $COMPOSE up -d --remove-orphans
 
 for i in $(seq 1 30); do
-  if curl -fsS http://127.0.0.1/health >/dev/null; then
-    echo "Deployment healthy: $NEW_SHA"
+  if curl -fsS http://127.0.0.1/health/ready >/dev/null; then
+    echo "Deployment healthy and dependencies ready: $NEW_SHA"
     find "$BACKUP_DIR" -type f -name 'postgres_*.sql' -mtime +30 -delete || true
     exit 0
   fi
   sleep 2
 done
 
-echo "Health check failed; rolling application code back to ${PREVIOUS_SHA:-unknown}" >&2
+echo "Readiness check failed; rolling application code back to ${PREVIOUS_SHA:-unknown}" >&2
 $COMPOSE ps >&2
 if [ -n "${PREVIOUS_SHA:-}" ]; then
   git checkout "$PREVIOUS_SHA"
