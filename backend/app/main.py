@@ -15,6 +15,7 @@ from app.api import (
     legal,
     practice,
     question_admin,
+    question_quality,
     questions,
     students,
 )
@@ -39,7 +40,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="学迹智评 v0.3.0：账号授权、题库审核、OCR与证据化AI学习报告闭环。",
+    description="学迹智评 v0.3.0：题库质量、勘误重判、OCR与证据化AI学习报告闭环。",
     docs_url="/docs" if settings.enable_api_docs else None,
     redoc_url=None,
     openapi_url="/openapi.json" if settings.enable_api_docs else None,
@@ -74,6 +75,7 @@ for router in [
     students.router,
     questions.router,
     question_admin.router,
+    question_quality.router,
     practice.router,
     documents.router,
     ai_reports.router,
