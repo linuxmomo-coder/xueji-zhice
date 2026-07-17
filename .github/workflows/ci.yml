@@ -22,7 +22,22 @@ jobs:
             backend/requirements.txt
             backend/requirements-dev.txt
       - run: pip install -q -r requirements-dev.txt
-      - run: ruff check app tests migrations
+      - name: Run Ruff
+        shell: bash
+        run: |
+          set +e
+          ruff check app tests migrations > ruff.log 2>&1
+          code=$?
+          cat ruff.log
+          exit $code
+      - name: Upload Ruff log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-log
+          path: backend/ruff.log
+          if-no-files-found: error
+          retention-days: 7
       - run: bandit -q -r app -x tests -s B105,B106
       - name: Run backend tests
         shell: bash
@@ -38,7 +53,7 @@ jobs:
         with:
           name: pytest-log
           path: backend/pytest.log
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
 
   backend-migrations:
@@ -72,7 +87,10 @@ jobs:
       STORAGE_PROVIDER: local
       FILE_STORAGE_PATH: /tmp/xueji-ci-uploads
       OCR_ENABLED: "false"
+      OCR_PROVIDER: disabled
       AI_ENABLED: "false"
+      AI_PRIMARY_PROVIDER: disabled
+      AI_FALLBACK_PROVIDER: disabled
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -82,7 +100,28 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: pip install -q -r requirements.txt
       - run: alembic upgrade head
-      - run: python -c "from sqlalchemy import create_engine, inspect; from app.core.config import settings; names=inspect(create_engine(settings.database_url)).get_table_names(); assert 'users' in names and 'account_tokens' in names and 'guardian_consents' in names and 'question_import_batches' in names and 'question_import_rows' in names and 'question_reviews' in names and 'question_sources' in names and 'ocr_jobs' in names and 'question_answer_rules' in names and 'audit_events' in names, names"
+      - name: Verify production schema
+        run: |
+          python - <<'PY'
+          from sqlalchemy import create_engine, inspect
+          from app.core.config import settings
+
+          inspector = inspect(create_engine(settings.database_url))
+          names = set(inspector.get_table_names())
+          required = {
+              "users", "account_tokens", "guardian_consents", "question_import_batches",
+              "question_import_rows", "question_reviews", "question_sources", "ocr_jobs",
+              "ai_reports", "question_answer_rules", "question_error_reports",
+              "question_correction_reviews", "answer_regrade_jobs", "question_taxonomy_nodes",
+              "question_taxonomy_mappings", "student_error_profiles", "question_relations",
+              "recommendation_events", "user_notifications", "audit_events",
+          }
+          missing = required - names
+          assert not missing, f"missing tables: {sorted(missing)}"
+          ai_columns = {column["name"] for column in inspector.get_columns("ai_reports")}
+          assert {"evidence_snapshot", "usage_json", "generation_key", "prompt_version"} <= ai_columns
+          PY
+      - run: python -c "import app.regrade_worker, app.ai_worker, app.worker"
       - run: alembic downgrade base
       - run: alembic upgrade head
 
@@ -104,6 +143,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate deployment scripts
+        run: sh -n deployment/preflight.sh deployment/deploy.sh deployment/restore-postgres.sh deployment/smoke-test.sh
       - run: cp .env.example .env
       - run: docker compose --env-file .env -f deployment/docker-compose.yml config
       - run: docker build -t xueji-zhice-backend ./backend

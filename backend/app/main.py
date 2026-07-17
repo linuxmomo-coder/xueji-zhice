@@ -4,6 +4,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from redis import Redis
+from redis.exceptions import RedisError
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api import (
     account,
@@ -15,11 +19,12 @@ from app.api import (
     legal,
     practice,
     question_admin,
+    question_quality,
     questions,
     students,
 )
 from app.core.config import settings
-from app.core.errors import install_error_handlers
+from app.core.errors import ApiError, install_error_handlers
 from app.core.middleware import RequestContextMiddleware
 from app.db.session import Base, SessionLocal, engine
 from app.seed import seed_demo_data
@@ -39,7 +44,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="学迹智评 v0.3.0：账号授权、题库审核、OCR与证据化AI学习报告闭环。",
+    description="学迹智评 v0.3.0：题库质量、勘误重判、OCR与证据化AI学习报告闭环。",
     docs_url="/docs" if settings.enable_api_docs else None,
     redoc_url=None,
     openapi_url="/openapi.json" if settings.enable_api_docs else None,
@@ -56,14 +61,34 @@ app.add_middleware(
 install_error_handlers(app)
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
+def _health_payload() -> dict[str, str]:
     return {
         "status": "ok",
         "service": "xueji-zhice-api",
         "version": settings.app_version,
         "environment": settings.app_env,
     }
+
+
+@app.get("/health")
+@app.get("/health/live")
+def health() -> dict[str, str]:
+    return _health_payload()
+
+
+@app.get("/health/ready")
+def readiness() -> dict[str, str]:
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        Redis.from_url(
+            settings.redis_url,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        ).ping()
+    except (SQLAlchemyError, RedisError, OSError) as exc:
+        raise ApiError(503, "HEALTH_001", "数据库或任务队列尚未就绪") from exc
+    return {**_health_payload(), "dependencies": "ready"}
 
 
 for router in [
@@ -74,6 +99,7 @@ for router in [
     students.router,
     questions.router,
     question_admin.router,
+    question_quality.router,
     practice.router,
     documents.router,
     ai_reports.router,
