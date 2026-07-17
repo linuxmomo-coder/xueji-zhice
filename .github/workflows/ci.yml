@@ -22,7 +22,22 @@ jobs:
             backend/requirements.txt
             backend/requirements-dev.txt
       - run: pip install -q -r requirements-dev.txt
-      - run: ruff check app tests migrations
+      - name: Run Ruff
+        shell: bash
+        run: |
+          set +e
+          ruff check app tests migrations > ruff.log 2>&1
+          code=$?
+          cat ruff.log
+          exit $code
+      - name: Upload Ruff log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-log
+          path: backend/ruff.log
+          if-no-files-found: error
+          retention-days: 7
       - run: bandit -q -r app -x tests -s B105,B106
       - name: Run backend tests
         shell: bash
