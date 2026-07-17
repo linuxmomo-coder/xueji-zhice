@@ -5,6 +5,42 @@ from pathlib import Path
 from typing import Protocol
 
 from app.core.config import settings
+from app.core.errors import ApiError
+
+SUPPORTED_UPLOAD_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "application/pdf",
+}
+PDF_DANGEROUS_MARKERS = (b"/JavaScript", b"/JS ", b"/Launch", b"/EmbeddedFile")
+
+
+def detect_content_type(content: bytes) -> str | None:
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "image/webp"
+    if content.startswith(b"%PDF-"):
+        return "application/pdf"
+    return None
+
+
+def validate_upload_content(content: bytes, declared_content_type: str | None) -> str | None:
+    if not declared_content_type:
+        return None
+    if declared_content_type not in SUPPORTED_UPLOAD_TYPES:
+        raise ApiError(415, "FILE_001", "不支持的文件类型")
+    detected = detect_content_type(content)
+    if detected != declared_content_type:
+        raise ApiError(415, "FILE_002", "文件真实格式与声明类型不一致")
+    if detected == "application/pdf":
+        sample = content[: 1024 * 1024]
+        if any(marker in sample for marker in PDF_DANGEROUS_MARKERS):
+            raise ApiError(415, "FILE_003", "PDF包含不允许的脚本、启动项或嵌入文件")
+    return detected
 
 
 @dataclass(frozen=True)
@@ -118,6 +154,7 @@ class LazyStorage:
         return self._get().provider
 
     def save(self, object_key: str, content: bytes, *, content_type: str | None = None) -> StoredObject:
+        validate_upload_content(content, content_type)
         return self._get().save(object_key, content, content_type=content_type)
 
     def read(self, object_key: str) -> bytes:
