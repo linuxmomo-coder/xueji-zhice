@@ -1,0 +1,166 @@
+学迹智评（Xueji Zhice）
+代码全面评审与产品改进建议
+基于仓库实测 + GitHub 同类项目横向研究
+评审对象：linuxmomo-coder/xueji-zhice
+评审基线：main 分支，提交 8803e32
+输出日期：2026-07-14
+一、执行摘要
+结论：当前仓库是一个视觉完成度较好的 MVP 原型和工程骨架，适合继续迭代验证产品方向，但尚不具备直接承载真实学生数据、真实家长账号和生产题库的条件。当前最大的风险不是界面，而是身份与数据边界、演示接口与生产接口混用、数据库迁移缺失、测试覆盖不足。
+二、评审范围与方法
+本次检查了仓库源码、README、设计文档、CI 配置、数据库模型、API、前端页面、Docker Compose 与 Nginx 配置，并执行了后端测试、前端构建、后端健康接口、学生端接口和本地浏览器界面冒烟测试。仓库规模约 40 个受 Git 管理文件、约 4,814 行文本，其中 Markdown 约 3,358 行、Python 约 756 行、TSX/CSS 约 447 行。
+三、必须优先修复的问题（P0）
+3.1 角色切换不是安全权限
+前端 App.tsx 中的角色切换仅修改 React state，并通过 /dashboard/{role} 选择页面内容。后端没有认证中间件，也没有基于用户、家庭、学生关系的授权依赖。当前“学生端/家长端/后台管理端”是 UI 视图，不是安全边界。任何能访问接口的人都可能直接调用学生列表、创建学生、确认资料和生成报告。
+改进：建立 User、Family、Membership、StudentGuardian、Session 五类基础模型；所有业务接口通过 CurrentUser 和 Policy 依赖做授权；后台题库接口必须单独的 admin scope；确认 OCR 资料必须校验当前家长与 student_id 的关系；拒绝只从前端传入 role 作为可信依据。
+3.2 演示接口和生产接口混在同一入口
+/documents/demo-ocr、/practice-sessions/demo、/reports/demo 直接写入数据库或返回固定演示结果；应用启动时通过 lifespan 执行 seed_demo_data。README 已明确这些是演示能力，但生产部署路径仍会启动它们，容易造成演示数据污染、误把模拟 AI/OCR 当成真实服务。
+改进：将 demo 路由放入 DemoRouter，仅在 APP_ENV=development 且显式 ENABLE_DEMO=true 时注册；生产环境禁止启动演示 seed；真实上传、OCR、报告、练习接口使用独立 service 层和异步任务状态。
+3.3 默认密钥和默认密码不应可用于生产
+配置和 Compose 中存在 change-me-in-production、change-me 等兜底值。即使 README 提醒修改，应用也应在 APP_ENV=production 时强制校验 SECRET_KEY、POSTGRES_PASSWORD、CORS_ORIGINS 等关键配置，缺失或仍为默认值时直接退出。
+改进：加入生产配置启动检查；使用 Secret Manager 或 Docker secrets；日志中禁止打印连接串；数据库用户采用最小权限；Redis、PostgreSQL 不暴露公网端口；生产启用 HTTPS、HSTS、Secure/HttpOnly/SameSite Cookie 或短期 Bearer token。
+3.4 数据库 create_all 不能替代迁移
+main.py 的 lifespan 在启动时执行 Base.metadata.create_all(bind=engine)。这适合原型，不适合生产：不会记录迁移版本、不会安全变更字段、无法回滚，多个实例同时启动时也缺乏明确的迁移协调。
+改进：正式使用 Alembic；CI 执行 upgrade head；发布流程先备份、迁移、健康检查、再切流；为题库和学习记录设计向后兼容的 schema 版本。
+四、重要工程问题（P1）
+五、架构改进建议
+5.1 推荐目标架构：模块化单体 + 异步任务 + 清晰边界
+当前 FastAPI + SQLAlchemy + PostgreSQL/pgvector + Redis + React/Vite 的技术选型可以保留。不要过早拆微服务，建议先把模块化边界做实，再用队列承载耗时任务。
+frontend（React） → API/BFF（FastAPI） → application services → domain modules → repositories
+                                                ├─ PostgreSQL/pgvector
+                                                ├─ Object Storage（图片/附件）
+                                                ├─ Redis（缓存/队列）
+                                                └─ OCR/LLM adapters（可替换）
+5.2 关键数据模型改造
+六、同类优秀 GitHub 项目横向学习
+以下项目不是简单照搬，而是提炼适合“学生—家长—题库—学习闭环”的设计经验。
+七、界面与用户操作习惯改进
+7.1 当前优点
+学生端、家长端、管理端使用不同强调色，视觉层次明确；品牌、状态、任务、快速操作和结果区域结构清晰。
+CSS 已包含 760px 和 1080px 响应式断点，移动端角色按钮会收缩，基础适配意识较好。
+主界面中的“直接事实/较高可信判断/可能情况/数据不足”是很好的可解释性方向，应保留并扩展。
+接口失败会进入页面消息区，按钮在 loading 时禁用，具备最基础的防重复点击意识。
+7.2 需要改变的交互
+7.3 推荐的学生端主流程
+今日任务 → 选择科目/知识点 → 3~5 道短练习 → 即时反馈（只解释关键一步）
+→ 错题自动归因 → 选择“再做一次/看提示/加入复习”
+→ 结束卡：完成度、掌握度、下一次复习时间
+7.4 推荐的家长端主流程
+家庭首页 → 本周变化（事实） → 需要关注的证据（带来源） → 两周建议
+→ 资料上传/OCR → 低置信字段确认 → 进入档案
+→ 家长提醒话术（不直接给答案） → 查看执行结果
+八、题库与 AI 能力升级路线
+九、测试与质量门禁建议
+建议把“能构建”升级为“可证明地正确”。
+后端：pytest + httpx，覆盖认证、家庭隔离、学生 CRUD、题库筛选、导入校验、OCR 状态机、确认权限、错误码。
+数据库：每个测试使用临时数据库；迁移从空库执行；种子数据只在显式 fixture 中加载。
+前端：Vitest 测试 API 错误、角色路由、按钮 loading、空状态；Playwright 测试学生练习和家长确认两条关键路径。
+安全：Bandit/ruff、pip-audit、npm audit、Trivy 镜像扫描、秘钥扫描；CI 阻止默认密钥和高危依赖。
+契约：从 OpenAPI 生成 TypeScript 类型；前后端接口变更必须先改 schema；检查文档接口与实际路由一致。
+可观测性：结构化日志、request_id、错误追踪、任务耗时、OCR 置信度、推荐采纳率；不要记录学生原始隐私内容。
+十、可直接拆分的开发任务清单
+十一、最终结论
+这套代码最值得保留的是：产品边界意识、三角色工作台的视觉方向、教材/题库/证据/AI 报告的整体产品叙事，以及把事实、判断和数据不足区分开的理念。最需要尽快改变的是：不要把前端角色切换当作权限；不要让 demo、seed 和生产入口混在一起；不要在没有认证、迁移和测试的情况下接入真实学生数据。
+建议下一轮不要继续堆叠 OCR 或 AI 展示功能，而是先完成 P0-01 至 P0-04，再实现一条真实、可审计、可复测的“家长上传成绩 → 确认 → 学生练习 → 判题 → 错题 → 复测 → 报告”闭环。这样比继续增加首页卡片更能提升产品可信度和长期可维护性。
+附录：参考链接
+https://github.com/linuxmomo-coder/xueji-zhice
+https://github.com/moodle/moodle
+https://github.com/frappe/lms
+https://github.com/learningequality/kolibri
+https://github.com/PrairieLearn/PrairieLearn
+https://github.com/openedx/edx-platform
+https://github.com/ankitects/anki
+https://fastapi.tiangolo.com/
+https://docs.sqlalchemy.org/en/20/
+https://playwright.dev/
+
+## 表格 1
+维度 | 当前判断 | 优先级
+工程可运行性 | 前端构建通过；后端健康检查通过；本机原始 pytest 因缺依赖无法收集，临时依赖环境重跑后 1 项通过 | P1
+产品完成度 | 三角色工作台已成形，但角色切换是前端状态，不是真实权限；核心功能仍为 demo 接口 | P0
+数据安全 | 未看到认证、授权、家庭/学生数据隔离的实际实现；存在默认密钥和默认数据库密码兜底 | P0
+题库能力 | Question 模型和题库文档方向正确，但缺少版本、审核、媒体、答案归一化等实际闭环 | P1
+界面体验 | 视觉统一、响应式基础不错；导航、状态反馈、真实任务流程、无障碍和空状态仍不足 | P1
+上线建议 | 先做“安全基线 + 真实闭环 + 测试基线”，再接入 OCR/AI 和扩大题库 | P0
+
+## 表格 2
+检查项 | 实际结果 | 证据
+后端原始测试命令 | 失败于测试收集：本机环境缺少 SQLAlchemy | backend/tests/test_health.py；ModuleNotFoundError
+后端临时依赖测试 | 通过：1 passed，存在 1 个 Starlette/httpx 弃用警告 | uv run --with-requirements requirements.txt pytest -q
+前端生产构建 | 通过：TypeScript 检查与 Vite 构建通过，产物正常生成 | npm run build
+API 健康检查 | HTTP 200 | GET http://127.0.0.1:8000/health
+学生 Dashboard | HTTP 200，返回演示学生和指标 | GET /api/v1/dashboard/student
+浏览器界面 | 可以打开；学生端切换家长端成功；后端连接状态可见 | Vite 本地页面 + 浏览器快照
+Docker | 未在本机执行完整容器启动；CI 配置包含构建检查 | deployment/docker-compose.yml；.github/workflows/ci.yml
+
+## 表格 3
+问题 | 影响 | 建议
+测试覆盖只有 1 个健康检查 | 核心接口、数据校验、权限、错误状态、前端交互没有回归保护 | 后端补 API 集成测试、数据库隔离 fixture、权限测试；前端补 Vitest；关键流程用 Playwright
+接口没有统一 service/repository 层 | 路由函数直接操作 ORM、混合业务规则，后续接真实 OCR/AI 会迅速膨胀 | Router 只做协议转换；Service 负责用例；Repository 负责查询；Adapter 负责 OCR/LLM/对象存储
+题目列表没有分页与稳定筛选协议 | 题库变大后响应慢，前端无法做分页、排序、游标加载 | 统一 page/page_size 或 cursor；限制最大 page_size；返回 total/next_cursor；增加复合索引
+缺少学习作答与判题闭环 | PracticeSession 只保存 question_ids 和计数，没有答题记录、提交、重做、错题和复测模型 | 增加 PracticeItem、Attempt、AnswerEvaluation、ErrorRecord；保存题目快照，避免题目更新破坏历史
+文档设计与实际 API 不一致 | docs/06-API.md 描述了 auth、upload、students/{id} 等接口，但代码未实现，容易误导联调 | 从 FastAPI OpenAPI 自动生成接口清单；文档标记 planned/demo/available；CI 检查文档与路由差异
+用户上传链路尚未实现 | 当前只有 OCR demo 请求，没有文件大小、类型、病毒扫描、对象存储、签名 URL、异步状态机 | 采用 presigned upload + metadata；白名单 MIME；大小限制；扫描；状态 uploaded→processing→review→confirmed
+主键关系和审计不足 | 学生、资料、报告等缺少操作者、来源、修改历史与软删除信息 | 加入 created_by、updated_by、deleted_at、audit_events；重要确认保留 before/after 和时间线
+前端直接显示原始 JSON | 用户无法以学习任务、证据卡、反馈卡理解结果 | API 结果转为结构化组件；原始 JSON 仅在开发者抽屉中显示
+
+## 表格 4
+模块 | 职责 | 第一阶段产物
+identity | 注册、登录、刷新、退出、家庭成员、角色与权限 | JWT/Session、RBAC/ABAC、权限测试
+student_profile | 学生档案、学期、教材绑定、家长确认 | 学生/家长关系校验和审计
+curriculum | 科目、教材、单元、知识点图谱 | 稳定 node_id、版本化目录
+question_bank | 题目、选项、答案、解析、媒体、映射、审核 | 草稿→审核→发布→下线
+practice | 组卷、作答、判题、错题、复测 | PracticeSession/Attempt/ErrorRecord
+evidence | 成绩、评语、OCR 候选、确认与修订 | 证据时间线和低置信度处理
+insight | 统计、报告、建议、推荐 | 事实/推断/建议分层，数据不足显式展示
+platform_admin | 运营、审计、配置、任务监控 | 后台不与学生端共用权限
+
+## 表格 5
+现有模型 | 建议补充 | 理由
+Student | family_id 外键、状态、软删除、操作者 | 避免默认 demo-family，支持真实家庭隔离
+Question | version、status、reviewer、source、copyright、media、snapshot | 支撑题库审核和历史可重放
+PracticeSession | PracticeItem、Attempt、answer_raw、answer_normalized、score | 支持主观题、客观题和错题闭环
+LearningDocument | asset_id、hash、storage_key、processing_job、audit | 支持重复检测、异步 OCR 和安全下载
+AIReport | evidence_ids、prompt_version、model、confidence、human_review | 可解释、可追溯、可复现
+全局 | AuditEvent、OutboxEvent、IdempotencyKey | 审计、异步可靠投递、防重复提交
+
+## 表格 6
+项目 | 可借鉴点 | 对学迹智评的启发
+Moodle / https://github.com/moodle/moodle | 成熟 LMS 的角色权限、课程结构、活动完成度、插件化扩展 | 把“教材—章节—任务—完成度”做成稳定内容树；权限和活动状态不能只靠前端
+Frappe LMS / https://github.com/frappe/lms | 开源 LMS，强调易用、课程、进度和管理后台 | 后台操作应围绕任务、筛选、批量处理，减少原始 JSON 和技术字段暴露
+Kolibri / https://github.com/learningequality/kolibri | offline-first、内容树、学习进度、弱网/离线场景 | 初中生家庭网络不稳定时，可增加本地缓存、断点同步和离线练习
+PrairieLearn / https://github.com/PrairieLearn/PrairieLearn | 参数化题目、自动判题、随机化、题目质量和可复现性 | 数学/物理题可引入参数化模板、题目快照和判题器版本，减少重复题
+Open edX / https://github.com/openedx/edx-platform | 大型学习平台的事件、课程、评估、服务边界与可观测性 | 学习事件统一埋点；报告必须能追溯到成绩、练习和确认过的证据
+Anki / https://github.com/ankitects/anki | 间隔重复、复习队列、错题/记忆强度的产品化 | 题库不仅“生成题”，还要根据遗忘曲线安排下一次复习
+
+## 表格 7
+现状 | 用户感受 | 改法
+角色切换按钮直接切换身份 | 容易误以为已经登录成不同角色，也隐藏了权限边界 | 改成登录后显示当前家庭/当前身份；切换身份必须有授权；管理员独立入口
+快速操作直接调用 demo API | 完成后只显示“API RESULT”原始 JSON，不像真实产品 | 改为任务向导：上传/选择→解析→确认→生成→查看；结果用卡片和下一步按钮呈现
+没有全局导航与返回路径 | 页面复杂后找不到题库、错题、报告、设置 | 左侧导航按“今日、练习、错题、报告、资料、家庭设置”组织；移动端底部导航
+加载时只有文字状态 | 用户不知道哪些区域正在加载 | 使用 skeleton、进度阶段、可取消任务；长任务显示“正在识别第几步”
+错误信息直接展示后端文本 | 可能泄露内部细节，学生也看不懂 | 前端统一错误码映射为可执行中文提示；开发模式才显示 request_id 和原始详情
+桌面端大面积留白、数据密度偏低 | 家长看不到重点证据和行动建议 | 采用“结论→证据→下一步”的三层结构；重要指标与行动按钮靠近
+没有无障碍语义 | 键盘、读屏和低视力用户操作困难 | 补 aria-label、focus-visible、按钮禁用原因、颜色之外的状态图标、对比度和字号测试
+
+## 表格 8
+阶段 | 目标 | 验收标准
+0.1 安全基线 | 真实认证、权限、生产配置校验、演示路由隔离、Alembic | 未登录不能访问学生数据；跨家庭访问测试全拒绝；生产缺密钥启动失败
+0.2 真实学习闭环 | 题目导入、审核、组题、作答、判题、错题、复测 | 完成一条完整学生流程；每个动作可追溯；至少覆盖客观题和计算题
+0.3 证据闭环 | 真实文件上传、异步 OCR、家长确认、修订历史 | 图片不落公网；低置信度字段必须人工确认；重复文件可识别
+0.4 智能推荐 | 知识点掌握估计、间隔复习、参数化题目、推荐解释 | 推荐能说明“因为哪些错题/成绩”；数据不足时不装作确定
+1.0 体验升级 | 完整导航、移动端、无障碍、离线缓存、通知和可观测性 | 核心任务可用性测试通过；关键路径成功率和完成时长达标
+
+## 表格 9
+编号 | 任务 | 完成定义
+P0-01 | 实现认证和家庭授权 | 所有业务接口依赖 current_user；跨家庭访问 403；后台接口单独 scope
+P0-02 | 隔离 demo 路由和 seed | 生产不注册 demo 路由；生产不写入演示学生；CI 验证
+P0-03 | 生产配置 fail-fast | 默认密钥/密码在 production 启动直接报错；CORS 白名单必填
+P0-04 | 接入 Alembic | 空库升级、旧库升级、回滚/备份流程可执行
+P1-01 | 建立题库审核状态机 | draft、pending_review、active、retired；审核人和版本历史可查
+P1-02 | 建立作答数据模型 | PracticeItem、Attempt、判题结果、错题与复测
+P1-03 | 统一分页和错误协议 | 所有列表接口分页；错误响应含 code、message、request_id
+P1-04 | 完善测试基线 | 后端核心接口覆盖率目标 70% 起；前端两条 E2E 路径
+P1-05 | 重做任务型 UI | 隐藏原始 JSON；增加导航、空状态、失败重试、任务进度
+P2-01 | 加入参数化数学/物理题 | 题目模板、随机种子、答案生成器和判题器版本化
+P2-02 | 离线与弱网 | 练习题缓存、答题队列、断点同步和冲突提示
+P2-03 | 无障碍与可用性测试 | 键盘操作、对比度、读屏、移动端触控目标和家长访谈
